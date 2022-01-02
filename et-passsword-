@@ -1,0 +1,21 @@
+[33m7e6cc5f[m[33m ([m[1;36mHEAD -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m HEAD@{0}: pull: Fast-forward
+[33m9c7e43c[m HEAD@{1}: checkout: moving from reset-passsword-&-other-fixes to main
+[33m44cc4e0[m[33m ([m[1;32mreset-passsword-&-other-fixes[m[33m)[m HEAD@{2}: commit: add reset password option and fixed other small issues
+[33m9c7e43c[m HEAD@{3}: checkout: moving from main to reset-passsword-&-other-fixes
+[33m9c7e43c[m HEAD@{4}: pull: Fast-forward
+[33me867ccf[m HEAD@{5}: reset: moving to HEAD
+[33me867ccf[m HEAD@{6}: pull: Fast-forward
+[33me71bfb0[m HEAD@{7}: pull: Fast-forward
+[33m00f5237[m HEAD@{8}: checkout: moving from new-mediamanager-updates to main
+[33mb1b5e9f[m[33m ([m[1;32mnew-mediamanager-updates[m[33m)[m HEAD@{9}: merge main: Merge made by the 'recursive' strategy.
+[33mcf175b8[m[33m ([m[1;31morigin/new-mediamanager-updates[m[33m)[m HEAD@{10}: checkout: moving from main to new-mediamanager-updates
+[33m00f5237[m HEAD@{11}: pull: Fast-forward
+[33m818e2f4[m HEAD@{12}: checkout: moving from new-mediamanager-updates to main
+[33mcf175b8[m[33m ([m[1;31morigin/new-mediamanager-updates[m[33m)[m HEAD@{13}: commit: fixed some models and added new routes to media manager
+[33m818e2f4[m HEAD@{14}: checkout: moving from main to new-mediamanager-updates
+[33m818e2f4[m HEAD@{15}: pull: Fast-forward
+[33m601397c[m HEAD@{16}: checkout: moving from mediamanager to main
+[33m44a5df6[m[33m ([m[1;31morigin/mediamanager[m[33m, [m[1;32mmediamanager[m[33m)[m HEAD@{17}: reset: moving to HEAD
+[33m44a5df6[m[33m ([m[1;31morigin/mediamanager[m[33m, [m[1;32mmediamanager[m[33m)[m HEAD@{18}: commit: added mediamanager fixed some bugs in userController file and schemas
+[33m601397c[m HEAD@{19}: checkout: moving from main to mediamanager
+[33m601397c[m HEAD@{20}: clone: from https://github.com/Nabeel110/Real-Challenge-Fit-Updated.git
