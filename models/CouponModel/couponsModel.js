@@ -37,6 +37,12 @@ const couponsSchema = mongoose.Schema(
         type: String,
       },
     ],
+    challengesApplicableOn: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Challenges",
+      },
+    ],
   },
   {
     timestamps: true,

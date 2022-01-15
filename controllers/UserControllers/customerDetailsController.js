@@ -114,17 +114,17 @@ const getCustomerById = asyncHandler(async (req, res) => {
   //trainers
 
   if (user) {
-    if (user.role === "customer") {
-      console.log("cehking", user);
-      return res.status(201).json({
-        message: "Customer with Details fetched successfully",
-        customer: user,
-      });
-    } else {
-      return res.status(404).json({
-        message: "The user requested is not a customer.",
-      });
-    }
+    // if (user.role === "customer") {
+    console.log("cehking", user);
+    return res.status(201).json({
+      message: "Customer with Details fetched successfully",
+      customer: user,
+    });
+    // } else {
+    //   return res.status(404).json({
+    //     message: "The user requested is not a customer.",
+    //   });
+    // }
   } else {
     res.status(404);
     throw new Error("Customer not found");

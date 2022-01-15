@@ -25,6 +25,9 @@ const createCoupon = asyncHandler(async (req, res, next) => {
       limitUsage: req.body.limitUsage,
       isActive: req.body.isActive,
       applicableOn: req.body.applicableOn,
+      challengesApplicableOn: req.body.challengesApplicableOn
+        ? req.body.challengesApplicableOn
+        : null,
     });
 
     newCoupon = await newCoupon.save();
