@@ -73,6 +73,7 @@ const createChallenge = asyncHandler(async (req, res, next) => {
 
     let newChallenge = new Challenges({
       user: req.user.id,
+      language: req.body.language,
       challengeName: req.body.challengeName,
       description: req.body.description,
       price: req.body.price,
@@ -240,7 +241,10 @@ const getChallengeById = asyncHandler(async (req, res) => {
 // // @desc    Get All challenges
 // // @route   GET /api/challenges/
 const getAllChallenges = asyncHandler(async (req, res) => {
-  const challenges = await Challenges.find({ isPublic: true }).populate([
+  const challenges = await Challenges.find({
+    isPublic: true,
+    language: req.query.language,
+  }).populate([
     "trainers",
     "challengeGoals",
     "body",

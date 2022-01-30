@@ -19,6 +19,7 @@ const createBlog = asyncHandler(async (req, res, next) => {
     console.log(req.body);
     if (req.user.role == "admin" || req.user.role == "blogger") {
       let newBlog = new Blog({
+        language: req.body.language,
         title: req.body.title,
         user: req.user.id,
         featuredImage: req.body.featuredImage,
@@ -53,7 +54,10 @@ const createBlog = asyncHandler(async (req, res, next) => {
 // @route   GET /api/blog/all
 // @route   Public
 const getAllBlogs = asyncHandler(async (req, res) => {
-  const blogs = await Blog.find({ isPublic: true })
+  const blogs = await Blog.find({
+    isPublic: true,
+    language: req.query.language,
+  })
     .populate("user")
     .select("-hashPassword")
     .populate("category");

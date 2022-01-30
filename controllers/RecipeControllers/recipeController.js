@@ -17,6 +17,7 @@ const createRecipe = asyncHandler(async (req, res, next) => {
     }
     console.log(req.body);
     let newRecipe = new Recipe({
+      language: req.body.language,
       name: req.body.name,
       user: req.user.id,
       description: req.body.description,
@@ -74,11 +75,12 @@ const getRecipeById = asyncHandler(async (req, res) => {
 });
 
 // @desc    Get All Recipes
-// @route   GET /api/recipes/recipe/
+// @route   GET /api/recipes/recipe?language=eng
 const getAllRecipes = asyncHandler(async (req, res) => {
-  const recipes = await Recipe.find({ isPublic: true }).populate(
-    "ingredients.name"
-  );
+  const recipes = await Recipe.find({
+    isPublic: true,
+    language: req.query.language,
+  }).populate("ingredients.name");
   if (recipes) {
     res.status(200).json({
       recipes: recipes,
