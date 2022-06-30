@@ -77,6 +77,7 @@ const createExercise = asyncHandler(async (req, res, next) => {
       // exerciseGroupName: req.body.exerciseGroupName,
       voiceOverLink: req.body.voiceOverLink,
       description: req.body.description,
+      language: req.body.language,
     });
 
     newExercise = await newExercise.save();
@@ -115,7 +116,15 @@ const updateExercise = asyncHandler(async (req, res, next) => {
 // @desc    Get All Exercises
 // @route   GET /api/exercise/
 const getAllExercises = asyncHandler(async (req, res) => {
-  const exercises = await Exercise.find({}).populate(["user", "trainer"]);
+  let exercises;
+  if (req.query.language && req.query.language.length > 0) {
+    exercises = await Exercise.find({ language: req.query.language }).populate([
+      "user",
+      "trainer",
+    ]);
+  } else {
+    exercises = await Exercise.find({}).populate(["user", "trainer"]);
+  }
 
   if (exercises) {
     res.status(200).json({
@@ -130,13 +139,26 @@ const getAllExercises = asyncHandler(async (req, res) => {
 
 const getAllUserExercises = asyncHandler(async (req, res) => {
   let exercises;
-  if (req.user.role === "admin") {
-    exercises = await Exercise.find({}).populate(["user", "trainer"]);
+  if (req.query.language && req.query.language.length > 0) {
+    if (req.user.role === "admin") {
+      exercises = await Exercise.find({
+        language: req.query.language,
+      }).populate(["user", "trainer"]);
+    } else {
+      exercises = await Exercise.find({
+        user: req.user.id,
+        language: req.query.language,
+      }).populate(["user", "trainer"]);
+    }
   } else {
-    exercises = await Exercise.find({ user: req.user.id }).populate([
-      "user",
-      "trainer",
-    ]);
+    if (req.user.role === "admin") {
+      exercises = await Exercise.find({}).populate(["user", "trainer"]);
+    } else {
+      exercises = await Exercise.find({ user: req.user.id }).populate([
+        "user",
+        "trainer",
+      ]);
+    }
   }
 
   if (exercises) {
@@ -179,6 +201,20 @@ const deleteExercise = asyncHandler(async (req, res) => {
   }
 });
 
+const destroy = asyncHandler(async (req, res, next) => {
+  try {
+    await Exercise.deleteMany({});
+
+    console.log("deletesd");
+    res.status(200).send({
+      status: "Successfully removed all Exercise files",
+    });
+  } catch (err) {
+    console.log(err);
+    next(err);
+  }
+});
+
 module.exports = {
   createExercise,
   updateExercise,
@@ -186,4 +222,5 @@ module.exports = {
   getAllExercises,
   deleteExercise,
   getAllUserExercises,
+  destroy,
 };

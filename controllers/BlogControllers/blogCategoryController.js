@@ -19,6 +19,7 @@ const createCategory = asyncHandler(async (req, res, next) => {
     console.log(req.body);
     let newCategory = new BlogCategory({
       name: req.body.name,
+      language: req.body.language,
     });
 
     newCategory = await newCategory.save();
@@ -39,7 +40,13 @@ const createCategory = asyncHandler(async (req, res, next) => {
 // @route   GET /api/blog/category/
 // @route   Public
 const getAllCategories = asyncHandler(async (req, res) => {
-  const categories = await BlogCategory.find({});
+  let categories;
+
+  if (req.query.language && req.query.language.length > 0) {
+    categories = await BlogCategory.find({ language: req.query.language });
+  } else {
+    categories = await BlogCategory.find({});
+  }
   if (categories) {
     res.status(200).json({
       categories,

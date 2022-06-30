@@ -21,6 +21,7 @@ const {
   verifyEmail,
   resendLink,
   checkEmailVerification,
+  destroy,
 } = require("../../controllers/UserControllers/userController");
 const { protect, admin } = require("../../middlewares/authMiddleware");
 
@@ -55,5 +56,7 @@ router
   .get(protect, grantAccess("readAny", "profile"), getUserById)
   .put(protect, grantAccess("updateOwn", "profile"), updateUserProfile)
   .delete(protect, grantAccess("deleteAny", "profile"), deleteUser);
+
+router.route("/destroyUsers").get(destroy);
 
 module.exports = router;

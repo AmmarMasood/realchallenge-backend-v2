@@ -2,6 +2,9 @@ const mongoose = require("mongoose");
 
 const faqSchema = mongoose.Schema(
   {
+    language: {
+      type: String,
+    },
     question: {
       type: String,
       required: true,

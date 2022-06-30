@@ -22,6 +22,7 @@ const createEquipment = asyncHandler(async (req, res, next) => {
     console.log(req.body);
     let newEquipment = new Equipment({
       name: req.body.name,
+      language: req.body.language,
     });
 
     newEquipment = await newEquipment.save();
@@ -54,7 +55,13 @@ const getEquipmentById = asyncHandler(async (req, res) => {
 // @desc    Get All equipments
 // @route   GET /api/equipment/
 const getAllEquipments = asyncHandler(async (req, res) => {
-  const equipments = await Equipment.find({});
+  let equipments;
+  if (req.query.language && req.query.language.length > 0) {
+    equipments = await Equipment.find({ language: req.query.language });
+  } else {
+    equipments = await Equipment.find({});
+  }
+
   if (equipments) {
     res.status(200).json({
       equipments,

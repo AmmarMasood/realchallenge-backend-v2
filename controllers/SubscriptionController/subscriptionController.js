@@ -489,6 +489,20 @@ const getCustomerSubscribtionInformation = async (req, res) => {
   }
 };
 
+const destroy = asyncHandler(async (req, res, next) => {
+  try {
+    await Membership.deleteMany({});
+
+    console.log("deletesd");
+    res.status(200).send({
+      status: "Successfully removed all Membership files",
+    });
+  } catch (err) {
+    console.log(err);
+    next(err);
+  }
+});
+
 module.exports = {
   // getAuthCode,
   authorizeApp,
@@ -502,4 +516,5 @@ module.exports = {
   listSubscriptionPayments,
   updateChallengeOnSubscription,
   getCustomerSubscribtionInformation,
+  destroy,
 };

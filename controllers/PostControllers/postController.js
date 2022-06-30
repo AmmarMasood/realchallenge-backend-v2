@@ -32,6 +32,7 @@ const createPost = asyncHandler(async (req, res, next) => {
       user: req.user.id,
       type: req.body.type,
       url: req.body.url,
+      language: req.body.language,
     });
 
     console.log(newPost);
@@ -59,11 +60,21 @@ const getAllPosts = asyncHandler(async (req, res) => {
   const count = await Post.countDocuments({});
 
   if (req.query.pageNumber) {
-    const posts = await Post.find({})
-      .populate("comments.user")
-      .sort({ date: -1 })
-      .limit(postCount)
-      .skip(postCount * (page - 1));
+    let posts;
+
+    if (req.query.language && req.query.language.length > 0) {
+      posts = await Post.find({ language: req.query.language })
+        .populate("comments.user")
+        .sort({ date: -1 })
+        .limit(postCount)
+        .skip(postCount * (page - 1));
+    } else {
+      posts = await Post.find({})
+        .populate("comments.user")
+        .sort({ date: -1 })
+        .limit(postCount)
+        .skip(postCount * (page - 1));
+    }
     if (posts) {
       if (posts.length > 0) {
         res.status(200).json({
@@ -80,7 +91,12 @@ const getAllPosts = asyncHandler(async (req, res) => {
       throw new Error("Posts Cannot be fetched");
     }
   } else {
-    const posts = await Post.find({});
+    let posts;
+    if (req.query.language && req.query.language.length > 0) {
+      posts = await Post.find({ language: req.query.language });
+    } else {
+      posts = await Post.find({});
+    }
     if (posts) {
       res.status(200).json({
         postCount: posts.length,
@@ -238,7 +254,9 @@ const commentOnPost = asyncHandler(async (req, res) => {
 
       post.comments.unshift(newComment);
       await post.save();
-      const newPost = await Post.findById(req.params.id).populate("comments.user");
+      const newPost = await Post.findById(req.params.id).populate(
+        "comments.user"
+      );
       res.status(200).json(newPost.comments);
     } else {
       return res.status(400).json({ message: "Post Not found" });

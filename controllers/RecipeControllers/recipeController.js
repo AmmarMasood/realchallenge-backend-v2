@@ -40,6 +40,7 @@ const createRecipe = asyncHandler(async (req, res, next) => {
       isPublic: req.body.isPublic,
       allowComments: req.body.allowComments,
       allowReviews: req.body.allowReviews,
+      alternativeLanguage: req.body.alternativeLanguage,
     });
 
     newRecipe = await newRecipe.save();
@@ -62,6 +63,7 @@ const getRecipeById = asyncHandler(async (req, res) => {
   const recipe = await Recipe.findById(req.params.recipeId)
     .populate("ingredients.name")
     .populate("mealTypes")
+    .populate("alternativeLanguage")
     .populate("foodTypes")
     .populate("reviews.user")
     .populate("comments.user");
@@ -80,7 +82,9 @@ const getAllRecipes = asyncHandler(async (req, res) => {
   const recipes = await Recipe.find({
     isPublic: true,
     language: req.query.language,
-  }).populate("ingredients.name");
+  })
+    .populate("ingredients.name")
+    .populate("alternativeLanguage");
   if (recipes) {
     res.status(200).json({
       recipes: recipes,
@@ -96,14 +100,33 @@ const getAllRecipes = asyncHandler(async (req, res) => {
 const getAllUserRecipes = asyncHandler(async (req, res) => {
   console.log("yesss", req.user.role);
   let recipes;
-  if (req.user.role === "admin") {
-    recipes = await Recipe.find({}).populate("ingredients.name");
+  if (req.query.language && req.query.language.length > 0) {
+    if (req.user.role === "admin") {
+      recipes = await Recipe.find({ language: req.query.language })
+        .populate("ingredients.name")
+        .populate("alternativeLanguage");
+    } else {
+      recipes = await Recipe.find({
+        user: req.user.id,
+        language: req.query.language,
+      })
+        .populate("ingredients.name")
+        .populate("alternativeLanguage");
+    }
   } else {
-    console.log("jere", req.user.role);
-    recipes = await Recipe.find({ user: req.user.id }).populate(
-      "ingredients.name"
-    );
+    if (req.user.role === "admin") {
+      recipes = await Recipe.find({})
+        .populate("ingredients.name")
+        .populate("alternativeLanguage");
+    } else {
+      recipes = await Recipe.find({
+        user: req.user.id,
+      })
+        .populate("ingredients.name")
+        .populate("alternativeLanguage");
+    }
   }
+
   if (recipes) {
     res.status(200).json({
       recipes: recipes,
@@ -252,6 +275,19 @@ const createRecipeComment = asyncHandler(async (req, res, next) => {
   }
 });
 
+const destroy = asyncHandler(async (req, res, next) => {
+  try {
+    const a = await Recipe.deleteMany({});
+    console.log("deletesd");
+    res.status(200).send({
+      status: "Successfully removed all documents from reciepe files",
+    });
+  } catch (err) {
+    console.log(err);
+    next(err);
+  }
+});
+
 module.exports = {
   createRecipe,
   getRecipeById,
@@ -261,4 +297,5 @@ module.exports = {
   createRecipeReview,
   createRecipeComment,
   getAllUserRecipes,
+  destroy,
 };

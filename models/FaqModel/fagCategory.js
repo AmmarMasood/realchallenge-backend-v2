@@ -5,6 +5,9 @@ const faqCategory = mongoose.Schema(
     name: {
       type: String,
     },
+    language: {
+      type: String,
+    },
   },
   { timestamps: true }
 );

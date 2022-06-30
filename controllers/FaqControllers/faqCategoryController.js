@@ -18,6 +18,7 @@ const createCategory = asyncHandler(async (req, res, next) => {
     console.log(req.body);
     let newCategory = new FaqCategory({
       name: req.body.name,
+      language: req.body.language,
     });
 
     newCategory = await newCategory.save();
@@ -37,8 +38,13 @@ const createCategory = asyncHandler(async (req, res, next) => {
 // @desc    Get All categories
 // @route   GET /api/faq/category/
 const getAllCategory = asyncHandler(async (req, res) => {
-  console.log("here");
-  const categories = await FaqCategory.find({});
+  let categories;
+  if (req.query.language && req.query.language.length > 0) {
+    categories = await FaqCategory.find({ language: req.query.language });
+  } else {
+    categories = await FaqCategory.find({});
+  }
+
   if (categories) {
     res.status(200).json({
       categories,

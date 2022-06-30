@@ -2,6 +2,9 @@ const mongoose = require("mongoose");
 
 const exerciseSchema = mongoose.Schema(
   {
+    language: {
+      type: String,
+    },
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

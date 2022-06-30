@@ -19,6 +19,7 @@ const createBody = asyncHandler(async (req, res, next) => {
     console.log(req.body);
     let newBody = new Body({
       name: req.body.name,
+      language: req.body.language,
     });
 
     newBody = await newBody.save();
@@ -51,7 +52,12 @@ const getBodyById = asyncHandler(async (req, res) => {
 // @desc    Get All body
 // @route   GET /api/body/
 const getAllBody = asyncHandler(async (req, res) => {
-  const body = await Body.find({});
+  let body;
+  if (req.query.language && req.query.language > 0) {
+    body = await Body.find({ language: req.query.language });
+  } else {
+    body = await Body.find({});
+  }
   if (body) {
     res.status(200).json({
       body,

@@ -20,6 +20,7 @@ const createBlog = asyncHandler(async (req, res, next) => {
     if (req.user.role == "admin" || req.user.role == "blogger") {
       let newBlog = new Blog({
         language: req.body.language,
+        alternativeLanguage: req.body.alternativeLanguage,
         title: req.body.title,
         user: req.user.id,
         featuredImage: req.body.featuredImage,
@@ -54,13 +55,25 @@ const createBlog = asyncHandler(async (req, res, next) => {
 // @route   GET /api/blog/all
 // @route   Public
 const getAllBlogs = asyncHandler(async (req, res) => {
-  const blogs = await Blog.find({
-    isPublic: true,
-    language: req.query.language,
-  })
-    .populate("user")
-    .select("-hashPassword")
-    .populate("category");
+  let blogs;
+  if (req.query.langauge && req.query.language.length > 0) {
+    blogs = await Blog.find({
+      isPublic: true,
+      language: req.query.language,
+    })
+      .populate("user")
+      .populate("alternativeLanguage")
+      .select("-hashPassword")
+      .populate("category");
+  } else {
+    blogs = await Blog.find({
+      isPublic: true,
+    })
+      .populate("user")
+      .populate("alternativeLanguage")
+      .select("-hashPassword")
+      .populate("category");
+  }
 
   if (blogs) {
     res.status(200).json({
@@ -77,17 +90,38 @@ const getAllBlogs = asyncHandler(async (req, res) => {
 // @route   Private
 const getAllUserBlogs = asyncHandler(async (req, res) => {
   let blogs;
-  console.log(req.user.role);
-  if (req.user.role === "admin") {
-    blogs = await Blog.find()
-      .populate("user")
-      .select("-hashPassword")
-      .populate("category");
+
+  if (req.query.language && req.query.language.length > 0) {
+    if (req.user.role === "admin") {
+      blogs = await Blog.find({ language: req.query.language })
+        .populate("user")
+        .populate("alternativeLanguage")
+        .select("-hashPassword")
+        .populate("category");
+    } else {
+      blogs = await Blog.find({
+        user: req.user.id,
+        language: req.query.language,
+      })
+        .populate("user")
+        .populate("alternativeLanguage")
+        .select("-hashPassword")
+        .populate("category");
+    }
   } else {
-    blogs = await Blog.find({ user: req.user.id })
-      .populate("user")
-      .select("-hashPassword")
-      .populate("category");
+    if (req.user.role === "admin") {
+      blogs = await Blog.find()
+        .populate("user")
+        .populate("alternativeLanguage")
+        .select("-hashPassword")
+        .populate("category");
+    } else {
+      blogs = await Blog.find({ user: req.user.id })
+        .populate("user")
+        .populate("alternativeLanguage")
+        .select("-hashPassword")
+        .populate("category");
+    }
   }
 
   if (blogs) {
@@ -170,6 +204,20 @@ const updateBlog = asyncHandler(async (req, res, next) => {
   }
 });
 
+const destroy = asyncHandler(async (req, res, next) => {
+  try {
+    await Blog.deleteMany({});
+
+    console.log("deletesd");
+    res.status(200).send({
+      status: "Successfully removed all Blog files",
+    });
+  } catch (err) {
+    console.log(err);
+    next(err);
+  }
+});
+
 module.exports = {
   createBlog,
   deleteBlog,
@@ -177,4 +225,5 @@ module.exports = {
   getAllBlogs,
   getAllUserBlogs,
   getBlogById,
+  destroy,
 };

@@ -22,9 +22,9 @@ const userSchema = mongoose.Schema(
       type: String,
       required: true,
     },
-    points:{
-      type:Number,
-      default:0
+    points: {
+      type: Number,
+      default: 0,
     },
     email: {
       type: String,
@@ -59,7 +59,6 @@ const userSchema = mongoose.Schema(
     },
     avatarLink: {
       type: String,
-      required: true,
       default:
         "https://thumbs.dreamstime.com/b/default-avatar-photo-placeholder-profile-icon-eps-file-easy-to-edit-default-avatar-photo-placeholder-profile-icon-124557887.jpg",
     },

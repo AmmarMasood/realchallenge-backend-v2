@@ -136,7 +136,7 @@ const getCustomerById = asyncHandler(async (req, res) => {
 const updateCustomer = asyncHandler(async (req, res, next) => {
   const user = await User.findById(req.params.customerId);
   console.log("here");
-  if (user.role === "customer") {
+  if (user.role === "customer" || user.role === "admin") {
     try {
       let customerDetails;
 

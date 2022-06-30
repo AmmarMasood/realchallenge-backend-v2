@@ -99,6 +99,7 @@ const createChallenge = asyncHandler(async (req, res, next) => {
       isPublic: req.body.isPublic,
       allowReviews: req.body.allowReviews,
       createPost: req.body.createPost,
+      alternativeLanguage: req.body.alternativeLanguage,
     });
 
     newChallenge = await newChallenge.save();
@@ -109,6 +110,7 @@ const createChallenge = asyncHandler(async (req, res, next) => {
       "tags",
       "additionalProducts",
       "music",
+      "alternativeLanguage",
       //"weeks.workouts",
       {
         path: "weeks",
@@ -241,38 +243,73 @@ const getChallengeById = asyncHandler(async (req, res) => {
 // // @desc    Get All challenges
 // // @route   GET /api/challenges/
 const getAllChallenges = asyncHandler(async (req, res) => {
-  const challenges = await Challenges.find({
-    isPublic: true,
-    language: req.query.language,
-  }).populate([
-    "trainers",
-    "challengeGoals",
-    "body",
-    "tags",
-    "additionalProducts",
-    "trainersFitnessInterest",
-    "music",
-    //"weeks.workouts",
-    {
-      path: "weeks",
-      populate: [
-        {
-          path: "workouts",
-          populate: [
-            {
-              path: "exercises.exerciseId",
-            },
-            {
-              path: "relatedEquipments",
-            },
-            {
-              path: "relatedProducts",
-            },
-          ],
-        },
-      ],
-    },
-  ]);
+  let challenges;
+  if (req.query.language && req.query.language.length > 0) {
+    challenges = await Challenges.find({
+      isPublic: true,
+      language: req.query.language,
+    }).populate([
+      "trainers",
+      "challengeGoals",
+      "body",
+      "tags",
+      "additionalProducts",
+      "trainersFitnessInterest",
+      "music",
+      //"weeks.workouts",
+      {
+        path: "weeks",
+        populate: [
+          {
+            path: "workouts",
+            populate: [
+              {
+                path: "exercises.exerciseId",
+              },
+              {
+                path: "relatedEquipments",
+              },
+              {
+                path: "relatedProducts",
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+  } else {
+    challenges = await Challenges.find({
+      isPublic: true,
+    }).populate([
+      "trainers",
+      "challengeGoals",
+      "body",
+      "tags",
+      "additionalProducts",
+      "trainersFitnessInterest",
+      "music",
+      //"weeks.workouts",
+      {
+        path: "weeks",
+        populate: [
+          {
+            path: "workouts",
+            populate: [
+              {
+                path: "exercises.exerciseId",
+              },
+              {
+                path: "relatedEquipments",
+              },
+              {
+                path: "relatedProducts",
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+  }
 
   if (challenges) {
     res.status(200).json({
@@ -287,65 +324,134 @@ const getAllChallenges = asyncHandler(async (req, res) => {
 const getAllUserChallenges = asyncHandler(async (req, res) => {
   let challenges;
   if (req.user.role === "admin") {
-    challenges = await Challenges.find({}).populate([
-      "trainers",
-      "challengeGoals",
-      "body",
-      "tags",
-      "additionalProducts",
-      "trainersFitnessInterest",
-      "music",
-      //"weeks.workouts",
-      {
-        path: "weeks",
-        populate: [
-          {
-            path: "workouts",
-            populate: [
-              {
-                path: "exercises.exerciseId",
-              },
-              {
-                path: "relatedEquipments",
-              },
-              {
-                path: "relatedProducts",
-              },
-            ],
-          },
-        ],
-      },
-    ]);
+    if (req.query.language && req.query.language.length > 0) {
+      challenges = await Challenges.find({
+        language: req.query.language,
+      }).populate([
+        "trainers",
+        "challengeGoals",
+        "body",
+        "tags",
+        "additionalProducts",
+        "trainersFitnessInterest",
+        "music",
+        //"weeks.workouts",
+        {
+          path: "weeks",
+          populate: [
+            {
+              path: "workouts",
+              populate: [
+                {
+                  path: "exercises.exerciseId",
+                },
+                {
+                  path: "relatedEquipments",
+                },
+                {
+                  path: "relatedProducts",
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+    } else {
+      challenges = await Challenges.find({}).populate([
+        "trainers",
+        "challengeGoals",
+        "body",
+        "tags",
+        "additionalProducts",
+        "trainersFitnessInterest",
+        "music",
+        //"weeks.workouts",
+        {
+          path: "weeks",
+          populate: [
+            {
+              path: "workouts",
+              populate: [
+                {
+                  path: "exercises.exerciseId",
+                },
+                {
+                  path: "relatedEquipments",
+                },
+                {
+                  path: "relatedProducts",
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+    }
   } else {
-    challenges = await Challenges.find({ user: req.user.id }).populate([
-      "trainers",
-      "challengeGoals",
-      "body",
-      "tags",
-      "additionalProducts",
-      "trainersFitnessInterest",
-      "music",
-      //"weeks.workouts",
-      {
-        path: "weeks",
-        populate: [
-          {
-            path: "workouts",
-            populate: [
-              {
-                path: "exercises.exerciseId",
-              },
-              {
-                path: "relatedEquipments",
-              },
-              {
-                path: "relatedProducts",
-              },
-            ],
-          },
-        ],
-      },
-    ]);
+    if (req.query.language && req.query.language.length > 0) {
+      challenges = await Challenges.find({
+        user: req.user.id,
+        language: req.query.language,
+      }).populate([
+        "trainers",
+        "challengeGoals",
+        "body",
+        "tags",
+        "additionalProducts",
+        "trainersFitnessInterest",
+        "music",
+        //"weeks.workouts",
+        {
+          path: "weeks",
+          populate: [
+            {
+              path: "workouts",
+              populate: [
+                {
+                  path: "exercises.exerciseId",
+                },
+                {
+                  path: "relatedEquipments",
+                },
+                {
+                  path: "relatedProducts",
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+    } else {
+      challenges = await Challenges.find({ user: req.user.id }).populate([
+        "trainers",
+        "challengeGoals",
+        "body",
+        "tags",
+        "additionalProducts",
+        "trainersFitnessInterest",
+        "music",
+        //"weeks.workouts",
+        {
+          path: "weeks",
+          populate: [
+            {
+              path: "workouts",
+              populate: [
+                {
+                  path: "exercises.exerciseId",
+                },
+                {
+                  path: "relatedEquipments",
+                },
+                {
+                  path: "relatedProducts",
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+    }
   }
 
   if (challenges) {
@@ -618,6 +724,20 @@ const grantAccess = function (action, resource) {
   };
 };
 
+const destroy = asyncHandler(async (req, res, next) => {
+  try {
+    await Challenges.deleteMany({});
+
+    console.log("deletesd");
+    res.status(200).send({
+      status: "Successfully removed all Challenges files",
+    });
+  } catch (err) {
+    console.log(err);
+    next(err);
+  }
+});
+
 module.exports = {
   createChallenge,
   getChallengeById,
@@ -629,4 +749,5 @@ module.exports = {
   grantAccess,
   getWeekByID,
   getAllUserChallenges,
+  destroy,
 };

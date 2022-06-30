@@ -33,6 +33,10 @@ const commentSchema = mongoose.Schema(
 
 const challengesSchema = mongoose.Schema(
   {
+    alternativeLanguage: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Challenges",
+    },
     language: {
       type: String,
       required: true,

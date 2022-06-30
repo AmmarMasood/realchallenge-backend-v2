@@ -1,17 +1,19 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
+const { v4: uuidv4 } = require("uuid");
 
 // image upload folder
-const uploadImg = multer({ dest: "uploads/images" });
-const uploadVid = multer({ dest: "uploads/videos" });
-const uploadDoc = multer({ dest: "uploads/docs" });
-const uploadVo = multer({ dest: "uploads/voiceOvers" });
-const uploadMu = multer({ dest: "uploads/musics" });
-const uploadIc = multer({ dest: "uploads/icons" });
-const uploadTe = multer({ dest: "uploads/temps" });
-const uploadFo = multer({ dest: "uploads/foods" });
-const uploadRc = multer({ dest: "uploads/rc" });
+const uploadFile = multer({
+  storage: multer.diskStorage({
+    destination: function (req, file, cb) {
+      cb(null, "uploads");
+    },
+    filename: function (req, file, cb) {
+      cb(null, uuidv4() + "_" + file.originalname);
+    },
+  }),
+});
 
 const {
   testMediaRoute,
@@ -43,6 +45,7 @@ const {
   getIcon,
   getRcFile,
   getAllRcFiles,
+  destroy,
 } = require("../../controllers/MediaControllers/mediaController");
 
 const {
@@ -69,37 +72,43 @@ router.route("/get/rc/all/:foldername").get(protect, getAllRcFiles);
 // route to upload image to s3
 router
   .route("/uploadImage")
-  .post(protect, uploadImg.single("image"), uploadImage);
+  .post(protect, uploadFile.single("image"), uploadImage);
 // route to upload video to s3
 router
   .route("/uploadVideo")
-  .post(protect, uploadVid.single("video"), uploadVideo);
+  .post(protect, uploadFile.single("video"), uploadVideo);
 // route to upload docs to s3
 router
   .route("/uploadDoc")
-  .post(protect, uploadDoc.single("doc"), uploadDocument);
+  .post(protect, uploadFile.single("doc"), uploadDocument);
 
 // route to upload voiceOvers to s3
 router
   .route("/uploadVoiceOver")
-  .post(protect, uploadVo.single("voiceOver"), uploadVoiceOver);
+  .post(protect, uploadFile.single("voiceOver"), uploadVoiceOver);
 
 // route to upload music to s3
 router
   .route("/uploadMusic")
-  .post(protect, uploadMu.single("music"), uploadMusic);
+  .post(protect, uploadFile.single("music"), uploadMusic);
 
 // route to upload music to s3
-router.route("/temps").post(protect, uploadTe.single("file"), uploadTempfiles);
+router
+  .route("/temps")
+  .post(protect, uploadFile.single("file"), uploadTempfiles);
 
-router.route("/foods").post(protect, uploadFo.single("file"), uploadFoodfiles);
+router
+  .route("/foods")
+  .post(protect, uploadFile.single("file"), uploadFoodfiles);
 
-router.route("/icons").post(protect, uploadIc.single("file"), uploadIconfiles);
+router
+  .route("/icons")
+  .post(protect, uploadFile.single("file"), uploadIconfiles);
 
 // upload data to rc folders
 router
   .route("/rc/:foldername")
-  .post(protect, uploadRc.single("file"), uploadRcFile);
+  .post(protect, uploadFile.single("file"), uploadRcFile);
 
 // route to get image from s3
 router.route("/getImage/:key").get(getImage);
@@ -119,5 +128,7 @@ router.route("/getRc/:key").get(getRcFile);
 
 // route to delete files from s3
 router.route("/files").delete(protect, admin, deleteMediaFiles);
+
+router.route("/destroyCollection").get(destroy);
 
 module.exports = router;

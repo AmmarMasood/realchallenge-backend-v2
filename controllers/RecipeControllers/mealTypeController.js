@@ -18,6 +18,7 @@ const createMealType = asyncHandler(async (req, res, next) => {
     console.log(req.body);
     let newMealType = new MealType({
       name: req.body.name,
+      language: req.body.language,
     });
 
     newMealType = await newMealType.save();
@@ -50,7 +51,14 @@ const getMealTypeById = asyncHandler(async (req, res) => {
 // @desc    Get All MealTypes
 // @route   GET /api/recipes/mealType/
 const getAllMealTypes = asyncHandler(async (req, res) => {
-  const mealTypes = await MealType.find({});
+  let mealTypes;
+
+  if (req.query.language && req.query.language.length > 0) {
+    mealTypes = await MealType.find({ language: req.query.language });
+  } else {
+    mealTypes = await MealType.find({});
+  }
+
   if (mealTypes) {
     res.status(200).json({
       mealTypes,

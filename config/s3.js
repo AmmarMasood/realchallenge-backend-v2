@@ -59,12 +59,11 @@ function uploadVideoFile(file, type) {
 exports.uploadVideoFile = uploadVideoFile;
 
 // get a file from s3
-function getFile(fileKey) {
-  const downloadParams = {
-    Key: fileKey,
-    Bucket: bucketName,
-  };
-  return s3.getObject(downloadParams).createReadStream();
+function getFile(fileKey, folder) {
+  console.log("who", fileKey, folder);
+  const file = fs.readFile(`/uploads/${folder}/${fileKey}`);
+  console.log("file", file);
+  return file;
 }
 
 exports.getFile = getFile;

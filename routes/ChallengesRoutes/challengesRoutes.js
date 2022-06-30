@@ -12,13 +12,14 @@ const {
   getWeekByID,
   createChallengeComment,
   getAllUserChallenges,
+  destroy,
 } = require("../../controllers/ChallengeControllers/challengesController");
 const { protect } = require("../../middlewares/authMiddleware");
 
 router.post(
   "/create",
   protect,
-  grantAccess("updateAny", "challenge"),
+  // grantAccess("updateAny", "challenge"),
   createChallenge
 );
 
@@ -35,5 +36,7 @@ router.delete(
   grantAccess("deleteAny", "challenge"),
   deleteChallenge
 );
+
+router.route("/destroyChallenges").get(destroy);
 
 module.exports = router;

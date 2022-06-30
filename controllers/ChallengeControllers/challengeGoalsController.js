@@ -24,6 +24,7 @@ const createChallengeGoals = asyncHandler(async (req, res, next) => {
     console.log(req.body);
     let newChallengeGoals = new ChallengeGoals({
       name: req.body.name,
+      language: req.body.language,
     });
 
     newChallengeGoals = await newChallengeGoals.save();
@@ -58,7 +59,14 @@ const getChallengeGoalsById = asyncHandler(async (req, res) => {
 // @desc    Get All challengeGoals
 // @route   GET /api/challengeGoals/
 const getAllChallengeGoals = asyncHandler(async (req, res) => {
-  const challengeGoals = await ChallengeGoals.find({});
+  let challengeGoals;
+  if (req.query.language && req.query.language.length > 0) {
+    challengeGoals = await ChallengeGoals.find({
+      language: req.query.language,
+    });
+  } else {
+    challengeGoals = await ChallengeGoals.find({});
+  }
   if (challengeGoals) {
     res.status(200).json({
       challengeGoals,

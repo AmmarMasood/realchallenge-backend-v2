@@ -5,6 +5,9 @@ const bodySchema = mongoose.Schema(
     name: {
       type: String,
     },
+    language: {
+      type: String,
+    },
   },
   { timestamps: true }
 );

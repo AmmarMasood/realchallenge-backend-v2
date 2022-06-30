@@ -17,6 +17,7 @@ const createTrainerGoal = asyncHandler(async (req, res, next) => {
     console.log(req.body);
     let newBody = new TrainerGoal({
       name: req.body.name,
+      language: req.body.language,
     });
 
     newBody = await newBody.save();
@@ -66,7 +67,12 @@ const updateTrainerGoal = asyncHandler(async (req, res, next) => {
 // @desc    Get All body
 // @route   GET /api/trainers/trainerGoals/all
 const getAllTrainerGoals = asyncHandler(async (req, res) => {
-  const body = await TrainerGoal.find({});
+  let body;
+  if (req.query.language && req.query.language.length > 0) {
+    body = await TrainerGoal.find({ language: req.query.language });
+  } else {
+    body = await TrainerGoal.find({});
+  }
   console.log("lmao");
   if (body) {
     res.status(200).json({

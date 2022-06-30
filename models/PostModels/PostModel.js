@@ -1,9 +1,14 @@
 const mongoose = require("mongoose");
+const { languages } = require("../../utils/language");
 
 const postSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
+  },
+  language: {
+    type: String,
+    enum: languages,
   },
   url: { type: String },
   title: {
@@ -12,7 +17,6 @@ const postSchema = new mongoose.Schema({
   },
   text: {
     type: String,
-    required: true,
   },
   image: {
     type: String,

@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-
+const languages = require("../../utils/language");
 const reviewSchema = mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -32,9 +32,12 @@ const commentSchema = mongoose.Schema(
 
 const recipeSchema = mongoose.Schema(
   {
+    alternativeLanguage: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Recipe",
+    },
     language: {
       type: String,
-      required: true,
     },
     name: {
       type: String,

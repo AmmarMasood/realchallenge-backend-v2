@@ -22,6 +22,7 @@ const createFaq = asyncHandler(async (req, res, next) => {
       answer: req.body.answer,
       category: req.body.category,
       isPublic: req.body.isPublic,
+      language: req.body.language,
     });
 
     newFaq = await newFaq.save();
@@ -41,7 +42,12 @@ const createFaq = asyncHandler(async (req, res, next) => {
 // @desc    Get All faqs
 // @route   GET /api/faq/all
 const getAllFaqs = asyncHandler(async (req, res) => {
-  const faqs = await Faq.find({});
+  let faqs;
+  if (req.query.language && req.query.language.length > 0) {
+    faqs = await Faq.find({ language: req.query.language });
+  } else {
+    faqs = await Faq.find({});
+  }
   if (faqs) {
     res.status(200).json({
       faqs,
@@ -98,10 +104,24 @@ const getFaqById = asyncHandler(async (req, res) => {
   }
 });
 
+const destroy = asyncHandler(async (req, res, next) => {
+  try {
+    const a = await Faq.deleteMany({});
+    console.log("deletesd");
+    res
+      .status(200)
+      .send({ status: "Successfully removed all documents from faq files" });
+  } catch (err) {
+    console.log(err);
+    next(err);
+  }
+});
+
 module.exports = {
   createFaq,
   getAllFaqs,
   updateFaq,
   deleteFaq,
   getFaqById,
+  destroy,
 };

@@ -25,10 +25,12 @@ const testMediaRoute = asyncHandler(async (req, res, next) => {
 const getImage = asyncHandler(async (req, res, next) => {
   try {
     const key = req.params.key;
-    const readStream = getFile(key);
+    console.log("ammar", key);
+    const readStream = getFile(key, "images");
     readStream.pipe(res);
+    return res.status(200).json({ message: "successs" });
   } catch (err) {
-    console.log(err);
+    console.log("yes", err);
     next(err);
   }
 });
@@ -36,8 +38,8 @@ const getImage = asyncHandler(async (req, res, next) => {
 const getRcFile = asyncHandler(async (req, res, next) => {
   try {
     const key = req.params.key;
-    const readStream = getFile(key);
-    readStream.pipe(res);
+    // const readStream = getFile(key);
+    // readStream.pipe(res);
   } catch (err) {
     console.log(err);
     next(err);
@@ -49,8 +51,8 @@ const getRcFile = asyncHandler(async (req, res, next) => {
 const getTemp = asyncHandler(async (req, res, next) => {
   try {
     const key = req.params.key;
-    const readStream = getFile(key);
-    readStream.pipe(res);
+    // const readStream = getFile(key);
+    // readStream.pipe(res);
   } catch (err) {
     console.log(err);
     next(err);
@@ -63,8 +65,8 @@ const getTemp = asyncHandler(async (req, res, next) => {
 const getFood = asyncHandler(async (req, res, next) => {
   try {
     const key = req.params.key;
-    const readStream = getFile(key);
-    readStream.pipe(res);
+    // const readStream = getFile(key);
+    // readStream.pipe(res);
   } catch (err) {
     console.log(err);
     next(err);
@@ -77,8 +79,8 @@ const getFood = asyncHandler(async (req, res, next) => {
 const getIcon = asyncHandler(async (req, res, next) => {
   try {
     const key = req.params.key;
-    const readStream = getFile(key);
-    readStream.pipe(res);
+    // const readStream = getFile(key);
+    // readStream.pipe(res);
   } catch (err) {
     console.log(err);
     next(err);
@@ -92,14 +94,10 @@ const uploadImage = asyncHandler(async (req, res, next) => {
   try {
     const file = req.file;
     const user = req.user;
-    console.log(file);
-    console.log(user);
-    const results = await uploadFile(file);
-    await unLinkFile(file.path);
     const f = await MediaFiles.create({
       user: user._id,
       filename: file.originalname,
-      filelink: `/media/getImage/${results.Key}`,
+      filelink: file.filename,
       foldername: "images",
     });
     res.status(200).json({ file: f, message: "sucess" });
@@ -117,25 +115,26 @@ const uploadRcFile = asyncHandler(async (req, res, next) => {
     const file = req.file;
     const user = req.user;
     const foldername = req.params.foldername;
+
     if (file.mimetype && file.mimetype.includes("video")) {
-      const fileType = file.originalname.split(".").pop();
-      const results = await uploadVideoFile(file, fileType);
-      await unLinkFile(file.path);
+      // const fileType = file.originalname.split(".").pop();
+      // const results = await uploadVideoFile(file, fileType);
+      // await unLinkFile(file.filename);
       const f = await MediaFiles.create({
         user: user._id,
         filename: file.originalname,
-        filelink: results.Location,
+        filelink: file.filename,
         foldername: foldername,
       });
       res.status(200).json({ file: f, message: "sucess" });
       return;
     }
-    const results = await uploadFile(file);
-    await unLinkFile(file.path);
+    // const results = await uploadFile(file);
+    // await unLinkFile(file.filename);
     const f = await MediaFiles.create({
       user: user._id,
       filename: file.originalname,
-      filelink: `/media/getRc/${results.Key}`,
+      filelink: file.filename,
       foldername: foldername,
     });
     res.status(200).json({ file: f, message: "sucess" });
@@ -153,13 +152,13 @@ const uploadMusic = asyncHandler(async (req, res, next) => {
     const file = req.file;
     const user = req.user;
     console.log(file);
-    console.log(user);
-    const results = await uploadFile(file);
-    await unLinkFile(file.path);
+    // console.log(user);
+    // const results = await uploadFile(file);
+    // await unLinkFile(file.filename);
     const f = await MediaFiles.create({
       user: user._id,
       filename: file.originalname,
-      filelink: `/media/getMusic/${results.Key}`,
+      filelink: file.filename,
       foldername: "musics",
     });
     res.status(200).json({ file: f, message: "sucess" });
@@ -173,12 +172,10 @@ const uploadDocument = asyncHandler(async (req, res, next) => {
   try {
     const file = req.file;
     const user = req.user;
-    const results = await uploadFile(file);
-    await unLinkFile(file.path);
     const f = await MediaFiles.create({
       user: user._id,
       filename: file.originalname,
-      filelink: `/media/getDoc/${results.Key}`,
+      filelink: file.filename,
       foldername: "docs",
     });
     res.status(200).json({ file: f, message: "sucess" });
@@ -194,8 +191,8 @@ const uploadDocument = asyncHandler(async (req, res, next) => {
 const getDoc = asyncHandler(async (req, res, next) => {
   try {
     const key = req.params.key;
-    const readStream = getFile(key);
-
+    // const readStream = getFile(key);
+    //
     readStream.pipe(res);
   } catch (err) {
     console.log(err);
@@ -209,8 +206,8 @@ const getDoc = asyncHandler(async (req, res, next) => {
 const getMusic = asyncHandler(async (req, res, next) => {
   try {
     const key = req.params.key;
-    const readStream = getFile(key);
-
+    // const readStream = getFile(key);
+    //
     readStream.pipe(res);
   } catch (err) {
     console.log(err);
@@ -224,8 +221,8 @@ const getMusic = asyncHandler(async (req, res, next) => {
 const getVideo = asyncHandler(async (req, res, next) => {
   try {
     const key = req.params.key;
-    const readStream = getFile(key);
-
+    // const readStream = getFile(key);
+    //
     readStream.pipe(res);
   } catch (err) {
     console.log(err);
@@ -239,8 +236,8 @@ const getVideo = asyncHandler(async (req, res, next) => {
 const getVoiceOver = asyncHandler(async (req, res, next) => {
   try {
     const key = req.params.key;
-    const readStream = getFile(key);
-
+    // const readStream = getFile(key);
+    //
     readStream.pipe(res);
   } catch (err) {
     console.log(err);
@@ -256,19 +253,19 @@ const uploadVideo = asyncHandler(async (req, res, next) => {
     const file = req.file;
     const fileType = file.originalname.split(".").pop();
     const user = req.user;
-    const results = await uploadVideoFile(file, fileType);
-    await unLinkFile(file.path);
-    console.log(results);
+    // const results = await uploadVideoFile(file, fileType);
+    // await unLinkFile(file.filename);
+    // console.log(results);
     const f = await MediaFiles.create({
       user: user._id,
       filename: file.originalname,
-      filelink: results.Location,
+      filelink: file.filename,
       foldername: "videos",
     });
-    console.log(file);
-    console.log(fileType);
-    console.log("results", results);
-    res.status(200).json({ file: "yas", message: "sucess" });
+    // console.log(file);
+    // console.log(fileType);
+    // console.log("results", results);
+    res.status(200).json({ file: f, message: "sucess" });
   } catch (err) {
     console.log(err);
     next(err);
@@ -282,17 +279,17 @@ const uploadVoiceOver = asyncHandler(async (req, res, next) => {
   try {
     const file = req.file;
     const user = req.user;
-    const results = await uploadFile(file);
+    // const results = await uploadFile(file);
 
-    await unLinkFile(file.path);
-    console.log(results);
+    // await unLinkFile(file.filename);
+    // console.log(results);
     const f = await MediaFiles.create({
       user: user._id,
       filename: file.originalname,
-      filelink: `/media/getVoiceOver/${results.Key}`,
+      filelink: file.filename,
       foldername: "voiceOvers",
     });
-    console.log(f);
+    // console.log(f);
     res.status(200).json({ file: f, message: "sucess" });
   } catch (err) {
     console.log(err);
@@ -304,20 +301,17 @@ const uploadVoiceOver = asyncHandler(async (req, res, next) => {
 // @route   post /api/media/foods
 // @access  Private
 const uploadFoodfiles = asyncHandler(async (req, res, next) => {
-  console.log(
-    "ammar--------------------------------------------------------------------------------"
-  );
   try {
     const file = req.file;
     const user = req.user;
-    const results = await uploadFile(file);
+    // const results = await uploadFile(file);
 
-    await unLinkFile(file.path);
-    console.log(results);
+    // await unLinkFile(file.filename);
+    // console.log(results);
     const f = await MediaFiles.create({
       user: user._id,
       filename: file.originalname,
-      filelink: `/media/getFood/${results.Key}`,
+      filelink: file.filename,
       foldername: "foods",
     });
     console.log(f);
@@ -335,17 +329,17 @@ const uploadIconfiles = asyncHandler(async (req, res, next) => {
   try {
     const file = req.file;
     const user = req.user;
-    const results = await uploadFile(file);
+    // const results = await uploadFile(file);
 
-    await unLinkFile(file.path);
-    console.log(results);
+    // await unLinkFile(file.filename);
+    // console.log(results);
     const f = await MediaFiles.create({
       user: user._id,
       filename: file.originalname,
-      filelink: `/media/getIcon/${results.Key}`,
+      filelink: file.filename,
       foldername: "icons",
     });
-    console.log(f);
+    // console.log(f);
     res.status(200).json({ file: f, message: "sucess" });
   } catch (err) {
     console.log(err);
@@ -360,14 +354,14 @@ const uploadTempfiles = asyncHandler(async (req, res, next) => {
   try {
     const file = req.file;
     const user = req.user;
-    const results = await uploadFile(file);
+    // const results = await uploadFile(file);
 
-    await unLinkFile(file.path);
-    console.log(results);
+    // await unLinkFile(file.filename);
+    // console.log(results);
     const f = await MediaFiles.create({
       user: user._id,
       filename: file.originalname,
-      filelink: `/media/getTemp/${results.Key}`,
+      filelink: file.filename,
       foldername: "temps",
     });
     console.log(f);
@@ -575,11 +569,26 @@ const deleteMediaFiles = asyncHandler(async (req, res, next) => {
         const a = await MediaFiles.deleteOne({ _id: f.id });
         var parts = f.link.split("/");
         var id = parts[parts.length - 1];
-        const res = await deleteFile(id);
+        // const res = await deleteFile(id);
+        unLinkFile(`./uploads/${f.link}`);
       });
+    console.log("yesss", files);
 
     res.status(200).send({ status: "success", deleted: req.body });
     //   res.status(200).json({ images: files });
+  } catch (err) {
+    console.log(err);
+    next(err);
+  }
+});
+
+const destroy = asyncHandler(async (req, res, next) => {
+  try {
+    const a = await MediaFiles.deleteMany({});
+    console.log("deletesd");
+    res
+      .status(200)
+      .send({ status: "Successfully removed all documents from media files" });
   } catch (err) {
     console.log(err);
     next(err);
@@ -615,4 +624,5 @@ module.exports = {
   getAllIcons,
   getRcFile,
   getAllRcFiles,
+  destroy,
 };

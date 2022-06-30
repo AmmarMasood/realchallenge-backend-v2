@@ -21,6 +21,7 @@ const createTags = asyncHandler(async (req, res, next) => {
     console.log(req.body);
     let newTag = new Tags({
       name: req.body.name,
+      language: req.body.language,
     });
 
     newTag = await newTag.save();
@@ -53,7 +54,12 @@ const getTagById = asyncHandler(async (req, res) => {
 // @desc    Get All tags
 // @route   GET /api/tags/
 const getAllTags = asyncHandler(async (req, res) => {
-  const tags = await Tags.find({});
+  let tags;
+  if (req.query.language && req.query.language.length > 0) {
+    tags = await Tags.find({ language: req.query.language });
+  } else {
+    tags = await Tags.find({});
+  }
   if (tags) {
     res.status(200).json({
       tags,

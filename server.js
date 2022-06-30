@@ -48,10 +48,13 @@ const app = express();
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
-
+// app.use(express.static("uploads/images"));
 app.use(express.json());
 // enables cors
 app.use(cors());
+
+app.use(express.static(__dirname + "/public"));
+app.use("/uploads", express.static("uploads"));
 // Import
 app.use("/api/media", mediaManagerRouter);
 app.use("/api/users", usersRouter);
