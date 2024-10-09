@@ -29,8 +29,8 @@ jobs:
         with:
           aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          region: "eu-north-1"
+          region: eu-north-1
           application_name: "realchallenge-application"
           environment_name: "Realchallenge-application-env"
           version_label: ${{ github.sha }}
-          zip_file: "realchallenge-app-build.zip"
+          zip_file: realchallenge-app-build.zip
