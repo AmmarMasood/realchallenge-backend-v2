@@ -33,4 +33,4 @@ jobs:
           application_name: "realchallenge-application"
           environment_name: "Realchallenge-application-env"
           version_label: ${{ github.sha }}
-          zip_file: realchallenge-app-build.zip
+          deployment_package: realchallenge-app-build.zip
