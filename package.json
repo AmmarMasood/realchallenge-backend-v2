@@ -8,7 +8,7 @@
     "dev": "nodemon server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "Nabeel Ahmed",
+  "author": "Ammar Masood",
   "license": "ISC",
   "dependencies": {
     "@mollie/api-client": "^3.5.1",

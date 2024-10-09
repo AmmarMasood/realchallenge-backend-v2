@@ -1,0 +1,36 @@
+name: CICD
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate Deployment Package
+        run: zip -r realchallenge-app-build.zip .
+
+      - name: Deploy to elastic beanstalk
+        uses: einaregilsson/elastic-beanstalk-deploy@v21
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          region: "eu-north-1"
+          application_name: "realchallenge-application"
+          environment_name: "Realchallenge-application-env"
+          version_label: ${{ github.sha }}
+          zip_file: "realchallenge-app-build.zip"
