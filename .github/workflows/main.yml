@@ -25,7 +25,7 @@ jobs:
         run: zip -r realchallenge-app-build.zip .
 
       - name: Deploy to elastic beanstalk
-        uses: einaregilsson/elastic-beanstalk-deploy@v21
+        uses: einaregilsson/beanstalk-deploy@v21
         with:
           aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
