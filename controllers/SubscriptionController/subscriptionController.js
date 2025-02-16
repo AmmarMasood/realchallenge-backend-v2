@@ -362,9 +362,11 @@ const updateChallengeOnSubscription = async (req, res) => {
     const user = await User.findById(userId).populate("customerDetails");
     console.log("userrrrrrrrrrrrr", user);
     const challenge = await Challenges.findById(challengeId);
+    console.log("ammar", challenge);
     if (user) {
-      console.log("here");
-      if (challenge.access.includes("FREE")) {
+      if (challenge.user.toString() === userId) {
+        return res.status(200).json("Success");
+      } else if (challenge.access.includes("FREE")) {
         console.log("free");
         let subscribedChallenges = user.customerDetails.challenges
           ? user.customerDetails.challenges
@@ -398,7 +400,6 @@ const updateChallengeOnSubscription = async (req, res) => {
           const challengeFound = subscribedChallenges.find(
             (challenge) => challengeId.toString() === challenge.toString()
           );
-          console.log("Challnege Found", challengeFound);
           if (!challengeFound) {
             console.log("here");
             subscribedChallenges.push(challengeId);
@@ -413,11 +414,16 @@ const updateChallengeOnSubscription = async (req, res) => {
               }
             );
           return res.status(200).json(updatedCustomerDetails);
+        } else {
+          throw new Error("No subscription found for this user.");
         }
       }
     }
   } catch (err) {
     console.log("errrors", err);
+    res.status(400).json({
+      message: "Cannot be Subcribed",
+    });
   }
 };
 

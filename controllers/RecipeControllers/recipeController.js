@@ -1,6 +1,10 @@
 const asyncHandler = require("express-async-handler");
 const { validationResult } = require("express-validator");
 const { Recipe } = require("../../models/RecipeModels/recipeModel");
+const {
+  createNotification,
+} = require("../NotificationControllers/notificationController");
+const notificationMessages = require("../../utils/notificationMessages");
 
 // @desc    Create Recipe
 // @route   POST /api/recipes/recipe/create
@@ -15,7 +19,6 @@ const createRecipe = asyncHandler(async (req, res, next) => {
       res.status(422).json({ errors: errors.array() });
       return;
     }
-    console.log(req.body);
     let newRecipe = new Recipe({
       language: req.body.language,
       name: req.body.name,
@@ -44,6 +47,20 @@ const createRecipe = asyncHandler(async (req, res, next) => {
     });
 
     newRecipe = await newRecipe.save();
+
+    if (req.body.sendNotification) {
+      await createNotification({
+        userGroup: "customer",
+        type: "new-recipe",
+        title: notificationMessages.recipeMessage.replace(
+          "{recipeName}",
+          newRecipe.name
+        ),
+        body: newRecipe.description,
+        onClick: `/recipe/${newRecipe.name}/${newRecipe._id}`,
+        sentBy: req.user.id,
+      });
+    }
     if (!newRecipe) {
       return res.status(400).json("Recipe cannot be created!");
     } else {

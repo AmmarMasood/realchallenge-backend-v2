@@ -95,8 +95,7 @@ const challengesSchema = mongoose.Schema(
     ],
     challengeGoals: [
       {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "ChallengeGoals",
+        type: String,
         required: true,
       },
     ],

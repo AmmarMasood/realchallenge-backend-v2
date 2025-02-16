@@ -17,12 +17,13 @@ const {
   createMusicWithChallenges,
   updateMusicWithChallenges,
 } = require("./musicController");
+const {
+  createNotification,
+} = require("../NotificationControllers/notificationController");
 
 // @desc    Create a Challenge
 // @route   POST /api/challenges/create
 const createChallenge = asyncHandler(async (req, res, next) => {
-  console.log("challenge", req.body);
-  console.log("wweeks", req.body.weeks);
   if (Object.keys(req.body).length === 0) {
     return res.status(500).json("Body fields cannot be empty.");
   }
@@ -105,7 +106,6 @@ const createChallenge = asyncHandler(async (req, res, next) => {
     newChallenge = await newChallenge.save();
     let Challenge = await Challenges.findById(newChallenge._id).populate([
       "trainers",
-      "challengeGoals",
       "body",
       "tags",
       "additionalProducts",
@@ -135,6 +135,20 @@ const createChallenge = asyncHandler(async (req, res, next) => {
     if (!Challenge) {
       return res.status(400).json("Challenge cannot be created!");
     } else {
+      if (req.body.sendNotification) {
+        await createNotification({
+          userGroup: "customer",
+          type: "new-challenge",
+          title: notificationMessages.challengeMessage.replace(
+            "{challengeName}",
+            newChallenge.challengeName
+          ),
+          body: challengeName.description,
+          onClick: `/challenge/${newChallenge.challengeName}/${newChallenge._id}`,
+          sentBy: req.user.id,
+        });
+      }
+
       return res.status(201).json({
         mesage: "Challenge Created Successfully",
         weeks: Challenge,
@@ -201,7 +215,6 @@ const getWeekByID = asyncHandler(async (req, res) => {
 const getChallengeById = asyncHandler(async (req, res) => {
   const challenge = await Challenges.findById(req.params.challengeId).populate([
     "trainers",
-    "challengeGoals",
     "body",
     "tags",
     "trainersFitnessInterest",
@@ -250,7 +263,6 @@ const getAllChallenges = asyncHandler(async (req, res) => {
       language: req.query.language,
     }).populate([
       "trainers",
-      "challengeGoals",
       "body",
       "tags",
       "additionalProducts",
@@ -282,7 +294,6 @@ const getAllChallenges = asyncHandler(async (req, res) => {
       isPublic: true,
     }).populate([
       "trainers",
-      "challengeGoals",
       "body",
       "tags",
       "additionalProducts",
@@ -329,7 +340,6 @@ const getAllUserChallenges = asyncHandler(async (req, res) => {
         language: req.query.language,
       }).populate([
         "trainers",
-        "challengeGoals",
         "body",
         "tags",
         "additionalProducts",
@@ -359,7 +369,6 @@ const getAllUserChallenges = asyncHandler(async (req, res) => {
     } else {
       challenges = await Challenges.find({}).populate([
         "trainers",
-        "challengeGoals",
         "body",
         "tags",
         "additionalProducts",
@@ -394,7 +403,6 @@ const getAllUserChallenges = asyncHandler(async (req, res) => {
         language: req.query.language,
       }).populate([
         "trainers",
-        "challengeGoals",
         "body",
         "tags",
         "additionalProducts",
@@ -424,7 +432,6 @@ const getAllUserChallenges = asyncHandler(async (req, res) => {
     } else {
       challenges = await Challenges.find({ user: req.user.id }).populate([
         "trainers",
-        "challengeGoals",
         "body",
         "tags",
         "additionalProducts",
