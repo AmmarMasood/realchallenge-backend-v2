@@ -85,49 +85,51 @@ const getAllCustomers = asyncHandler(async (req, res) => {
 // @desc    Get Customer Details by ID
 // @route   GET /api/customerDetails/:customerDetailsId
 const getCustomerById = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.params.customerId).populate({
-    path: "customerDetails",
-    populate: [
-      {
-        path: "challenges",
-        populate: [
-          {
-            path: "trainers",
-          },
-          {
-            path: "challengeGoals",
-          },
-        ],
-      },
-      {
-        path: "membership",
-      },
-      {
-        path: "groceryList",
-      },
-      {
-        path: "myDiet",
-      },
-    ],
-  });
-
-  //trainers
-
-  if (user) {
-    // if (user.role === "customer") {
-    console.log("cehking", user);
-    return res.status(201).json({
-      message: "Customer with Details fetched successfully",
-      customer: user,
+  try {
+    const user = await User.findById(req.params.customerId).populate({
+      path: "customerDetails",
+      populate: [
+        {
+          path: "challenges",
+          populate: [
+            {
+              path: "trainers",
+            },
+          ],
+        },
+        {
+          path: "membership",
+        },
+        {
+          path: "groceryList",
+        },
+        {
+          path: "myDiet",
+        },
+      ],
     });
-    // } else {
-    //   return res.status(404).json({
-    //     message: "The user requested is not a customer.",
-    //   });
-    // }
-  } else {
-    res.status(404);
-    throw new Error("Customer not found");
+
+    //trainers
+
+    if (user) {
+      // if (user.role === "customer") {
+      console.log("cehking", user);
+      return res.status(201).json({
+        message: "Customer with Details fetched successfully",
+        customer: user,
+      });
+      // } else {
+      //   return res.status(404).json({
+      //     message: "The user requested is not a customer.",
+      //   });
+      // }
+    } else {
+      res.status(404);
+      throw new Error("Customer not found");
+    }
+  } catch (err) {
+    console.log(err);
+    throw err;
   }
 });
 
@@ -320,7 +322,7 @@ const getRecommendedChallenge = asyncHandler(async (req, res) => {
     .populate("customerDetails");
   const custGoals = await customer.customerDetails.goals;
   //goals []
-  const challenges = await Challenges.find({}).populate("challengeGoals");
+  const challenges = await Challenges.find({});
 
   let isFound = false;
   if (challenges && custGoals) {

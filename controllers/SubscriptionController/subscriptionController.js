@@ -392,7 +392,7 @@ const updateChallengeOnSubscription = async (req, res) => {
         return res.status(200).json(updatedCustomerDetails);
         // await user.save();
       } else {
-        if (user.subcriptionId) {
+        if (user.subcriptionId || user.role === "admin") {
           let subscribedChallenges = user.customerDetails.challenges
             ? user.customerDetails.challenges
             : [];
