@@ -13,26 +13,31 @@ const smtpTransport = require("nodemailer-smtp-transport");
 const nodemailer = require("nodemailer");
 const aws = require("aws-sdk");
 
-// const aws_ses = new aws.SES(sesConfig);
-const aws_ses = new aws.SES();
+const sesConfig = {
+  accessKeyId: process.env.AWS_SES_KEY,
+  secretAccessKey: process.env.AWS_SES_SECRET,
+  region: process.env.AWS_SES_REGION,
+};
+
+const aws_ses = new aws.SES(sesConfig);
 
 // let transporter = nodemailer.createTransport(
 //   process.env.NODE_MAILER_LINK
 // );
 
-let transporter = nodemailer.createTransport({
-  host: process.env.NODE_MAILER_HOST,
-  port: 25,
-  secure: false,
-  auth: {
-    user: NODE_MAILER_EMAIL,
-    pass: NODE_MAILER_PASS,
-  },
-  tls: {
-    // do not fail on invalid certs
-    rejectUnauthorized: false,
-  },
-});
+// let transporter = nodemailer.createTransport({
+//   host: process.env.NODE_MAILER_HOST,
+//   port: 25,
+//   secure: false,
+//   auth: {
+//     user: process.env.NODE_MAILER_EMAIL,
+//     pass: process.env.NODE_MAILER_PASS,
+//   },
+//   tls: {
+//     // do not fail on invalid certs
+//     rejectUnauthorized: false,
+//   },
+// });
 
 const sendEmail = async (email, subject, text) => {
   const params = {
@@ -47,12 +52,7 @@ const sendEmail = async (email, subject, text) => {
     },
     Source: "ammar.masood98@gmail.com",
   };
-  return new Promise((resolve, reject) => {
-    setTimeout(() => {
-      resolve("foo");
-    }, 300);
-  });
-  // return aws_ses.sendEmail(params).promise();
+  return aws_ses.sendEmail(params).promise();
 };
 
 // @desc    Auth user & get token

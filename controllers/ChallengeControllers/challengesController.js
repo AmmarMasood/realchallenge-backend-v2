@@ -542,7 +542,6 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
         challenge._id
       ).populate([
         "trainers",
-        "challengeGoals",
         "body",
         "tags",
         "additionalProducts",

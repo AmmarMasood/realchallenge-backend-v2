@@ -51,12 +51,12 @@ const createWorkout = asyncHandler(async (workout) => {
     //   }
     // }
 
+    console.log("jajjajajaja", workout);
     let newWorkout = new Workout({
       title: workout.title,
       subtitle: workout.subtitle,
       infoTitle: workout.infotitle,
       infoFile: workout.infoFile,
-      relatedEquipments: workout.equipment, //ids resolved
       relatedProducts: workout.relatedProducts, //ids aayegi
       introVideoLink: workout.introVideoLink,
       introVideoLength: workout.introVideoLength,
@@ -153,7 +153,7 @@ const updateWorkout = asyncHandler(async (req, res, next) => {
         introVideoLink: req.body.introVideoLink
           ? req.body.introVideoLink
           : oldWorkout.introVideoLink,
-          introVideoLength: req.body.introVideoLength
+        introVideoLength: req.body.introVideoLength
           ? req.body.introVideoLength
           : oldWorkout.introVideoLength,
         relatedEquipments: req.body.relatedEquipments
