@@ -51,7 +51,7 @@ const challengesSchema = mongoose.Schema(
     },
     description: {
       type: String,
-      required: true,
+      required: false,
     },
     price: {
       type: Number,
@@ -67,15 +67,15 @@ const challengesSchema = mongoose.Schema(
     },
     thumbnailLink: {
       type: String,
-      required: true,
+      required: false,
     },
     videoThumbnailLink: {
       type: String,
-      required: true,
+      required: false,
     },
     videoLink: {
       type: String,
-      required: true,
+      required: false,
     },
     //TODO: membership
     access: [
@@ -85,6 +85,7 @@ const challengesSchema = mongoose.Schema(
     ],
     difficulty: {
       type: String,
+      required: false,
     },
     trainers: [
       {
@@ -96,7 +97,7 @@ const challengesSchema = mongoose.Schema(
     challengeGoals: [
       {
         type: String,
-        required: true,
+        required: false,
       },
     ],
     tags: [
@@ -114,7 +115,7 @@ const challengesSchema = mongoose.Schema(
 
     duration: {
       type: Number,
-      required: true,
+      required: false,
     },
 
     weeks: [
