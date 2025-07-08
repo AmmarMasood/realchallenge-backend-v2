@@ -7,9 +7,19 @@ const {
 } = require("../../config/s3");
 const fs = require("fs");
 const util = require("util");
-const unLinkFile = util.promisify(fs.unlink);
+const path = require("path");
+
 const MediaFiles = require("../../models/MediaManagerModels/mediaFileModel");
 const { Mongoose } = require("mongoose");
+
+const unLinkFile = async (filename) => {
+  const filePath = path.join(__dirname, "../../uploads/", filename);
+  try {
+    await fs.promises.unlink(filePath);
+  } catch (err) {
+    console.error("Error deleting file:", err);
+  }
+};
 
 // @desc    test route
 // @route   get /api/media/test
@@ -25,7 +35,6 @@ const testMediaRoute = asyncHandler(async (req, res, next) => {
 const getImage = asyncHandler(async (req, res, next) => {
   try {
     const key = req.params.key;
-    console.log("ammar", key);
     const readStream = getFile(key, "images");
     readStream.pipe(res);
     return res.status(200).json({ message: "successs" });
@@ -94,12 +103,16 @@ const uploadImage = asyncHandler(async (req, res, next) => {
   try {
     const file = req.file;
     const user = req.user;
+    const uploadedFile = await uploadFile(file);
+
     const f = await MediaFiles.create({
       user: user._id,
-      filename: file.originalname,
-      filelink: file.filename,
+      filename: file.filename,
+      filelink: uploadedFile.Location,
       foldername: "images",
     });
+
+    await unLinkFile(file.filename);
     res.status(200).json({ file: f, message: "sucess" });
   } catch (err) {
     console.log(err);
@@ -116,21 +129,8 @@ const uploadRcFile = asyncHandler(async (req, res, next) => {
     const user = req.user;
     const foldername = req.params.foldername;
 
-    if (file.mimetype && file.mimetype.includes("video")) {
-      // const fileType = file.originalname.split(".").pop();
-      // const results = await uploadVideoFile(file, fileType);
-      // await unLinkFile(file.filename);
-      const f = await MediaFiles.create({
-        user: user._id,
-        filename: file.originalname,
-        filelink: file.filename,
-        foldername: foldername,
-      });
-      res.status(200).json({ file: f, message: "sucess" });
-      return;
-    }
-    // const results = await uploadFile(file);
-    // await unLinkFile(file.filename);
+    const results = await uploadFile(file);
+    await unLinkFile(file.filename);
     const f = await MediaFiles.create({
       user: user._id,
       filename: file.originalname,
@@ -253,13 +253,13 @@ const uploadVideo = asyncHandler(async (req, res, next) => {
     const file = req.file;
     const fileType = file.originalname.split(".").pop();
     const user = req.user;
-    // const results = await uploadVideoFile(file, fileType);
-    // await unLinkFile(file.filename);
-    // console.log(results);
+    const results = await uploadVideoFile(file, fileType);
+    await unLinkFile(file.filename);
+    console.log(results);
     const f = await MediaFiles.create({
       user: user._id,
-      filename: file.originalname,
-      filelink: file.filename,
+      filename: file.filename,
+      filelink: results.Location,
       foldername: "videos",
     });
     // console.log(file);
@@ -566,11 +566,12 @@ const deleteMediaFiles = asyncHandler(async (req, res, next) => {
 
     files &&
       files.map(async (f) => {
-        const a = await MediaFiles.deleteOne({ _id: f.id });
+        console.log("ammar", f);
+        // const a = await MediaFiles.deleteOne({ _id: f.id });
         var parts = f.link.split("/");
         var id = parts[parts.length - 1];
         // const res = await deleteFile(id);
-        unLinkFile(`./uploads/${f.link}`);
+        // unLinkFile(`./uploads/${f.link}`);
       });
     console.log("yesss", files);
 
@@ -584,8 +585,7 @@ const deleteMediaFiles = asyncHandler(async (req, res, next) => {
 
 const destroy = asyncHandler(async (req, res, next) => {
   try {
-    const a = await MediaFiles.deleteMany({});
-    console.log("deletesd");
+    await MediaFiles.deleteMany({});
     res
       .status(200)
       .send({ status: "Successfully removed all documents from media files" });

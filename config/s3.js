@@ -5,8 +5,8 @@ dotenv.config();
 
 const bucketName = process.env.AWS_BUCKET_NAME;
 const bucketRegion = process.env.AWS_BUCKET_REGION;
-const accessKey = process.env.AWS_ACCESS_KEY;
-const secretKey = process.env.AWS_SECRET_KEY;
+const accessKey = process.env.AWS_BUCKET_ACCESS;
+const secretKey = process.env.AWS_BUCKET_SECRET;
 
 const s3 = new S3({
   region: bucketRegion,
@@ -17,12 +17,17 @@ const s3 = new S3({
 // upload a file to s3
 function uploadFile(file) {
   const fileStream = fs.createReadStream(file.path);
-  //   console.log(fileStream);
-  console.log(bucketName);
+
+  let contentType = "application/octet-stream";
+  if (file.mimetype) {
+    contentType = file.mimetype;
+  }
+
   const uploadParams = {
     Bucket: bucketName,
     Body: fileStream,
     Key: file.filename,
+    ContentType: contentType,
   };
   return s3.upload(uploadParams).promise();
 }
