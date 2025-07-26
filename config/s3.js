@@ -19,6 +19,9 @@ function uploadFile(file) {
   const fileStream = fs.createReadStream(file.path);
 
   let contentType = "application/octet-stream";
+
+  console.log("uploading file", bucketName, bucketRegion, accessKey, secretKey);
+
   if (file.mimetype) {
     contentType = file.mimetype;
   }

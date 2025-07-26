@@ -151,16 +151,16 @@ const uploadMusic = asyncHandler(async (req, res, next) => {
   try {
     const file = req.file;
     const user = req.user;
-    console.log(file);
-    // console.log(user);
-    // const results = await uploadFile(file);
-    // await unLinkFile(file.filename);
+    const uploadedFile = await uploadFile(file);
+
     const f = await MediaFiles.create({
       user: user._id,
-      filename: file.originalname,
-      filelink: file.filename,
+      filename: file.filename,
+      filelink: uploadedFile.Location,
       foldername: "musics",
     });
+
+    await unLinkFile(file.filename);
     res.status(200).json({ file: f, message: "sucess" });
   } catch (err) {
     console.log(err);
@@ -279,17 +279,16 @@ const uploadVoiceOver = asyncHandler(async (req, res, next) => {
   try {
     const file = req.file;
     const user = req.user;
-    // const results = await uploadFile(file);
+    const uploadedFile = await uploadFile(file);
 
-    // await unLinkFile(file.filename);
-    // console.log(results);
     const f = await MediaFiles.create({
       user: user._id,
-      filename: file.originalname,
-      filelink: file.filename,
+      filename: file.filename,
+      filelink: uploadedFile.Location,
       foldername: "voiceOvers",
     });
-    // console.log(f);
+
+    await unLinkFile(file.filename);
     res.status(200).json({ file: f, message: "sucess" });
   } catch (err) {
     console.log(err);
