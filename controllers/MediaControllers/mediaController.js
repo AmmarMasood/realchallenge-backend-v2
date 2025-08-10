@@ -1,16 +1,14 @@
 const asyncHandler = require("express-async-handler");
 const {
   uploadFile,
-  getFile,
   deleteFile,
-  uploadVideoFile,
+  deleteFolderFromS3,
 } = require("../../config/s3");
 const fs = require("fs");
-const util = require("util");
 const path = require("path");
 
 const MediaFiles = require("../../models/MediaManagerModels/mediaFileModel");
-const { Mongoose } = require("mongoose");
+const MediaFolder = require("../../models/MediaManagerModels/mediaFolderModel");
 
 const unLinkFile = async (filename) => {
   const filePath = path.join(__dirname, "../../uploads/", filename);
@@ -29,599 +27,131 @@ const testMediaRoute = asyncHandler(async (req, res, next) => {
   res.status(200).json({ message: "test success" });
 });
 
-// @desc    get image
-// @route   get /api/media/getImage
-// @access  Private
-const getImage = asyncHandler(async (req, res, next) => {
-  try {
-    const key = req.params.key;
-    const readStream = getFile(key, "images");
-    readStream.pipe(res);
-    return res.status(200).json({ message: "successs" });
-  } catch (err) {
-    console.log("yes", err);
-    next(err);
+const createMediaFolder = asyncHandler(async (req, res, next) => {
+  const { name, mediaType } = req.body;
+  const user = req.user;
+  if (!name || !mediaType) {
+    return res.status(400).json({ message: "Name and mediaType are required" });
   }
+  const folder = await MediaFolder.create({
+    user: user._id,
+    name,
+    mediaType,
+  });
+  res.status(201).json({ folder, message: "Folder created successfully" });
 });
 
-const getRcFile = asyncHandler(async (req, res, next) => {
-  try {
-    const key = req.params.key;
-    // const readStream = getFile(key);
-    // readStream.pipe(res);
-  } catch (err) {
-    console.log(err);
-    next(err);
+const getMediaFolder = asyncHandler(async (req, res, next) => {
+  const folder = await MediaFolder.findById(req.params.id);
+  if (!folder) {
+    return res.status(404).json({ message: "Folder not found" });
   }
-});
-// @desc    get temp
-// @route   get /api/media/getTemp
-// @access  Private
-const getTemp = asyncHandler(async (req, res, next) => {
-  try {
-    const key = req.params.key;
-    // const readStream = getFile(key);
-    // readStream.pipe(res);
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
+  res.status(200).json({ folder });
 });
 
-// @desc    get food
-// @route   get /api/media/getFood
-// @access  Private
-const getFood = asyncHandler(async (req, res, next) => {
-  try {
-    const key = req.params.key;
-    // const readStream = getFile(key);
-    // readStream.pipe(res);
-  } catch (err) {
-    console.log(err);
-    next(err);
+const deleteMediaFolder = asyncHandler(async (req, res, next) => {
+  const folder = await MediaFolder.findById(req.params.id);
+  if (!folder) {
+    return res.status(404).json({ message: "Folder not found" });
   }
+  await folder.remove();
+  await deleteFolderFromS3(req.params.id);
+  res.status(200).json({ message: "Folder and associated media deleted" });
 });
 
-// @desc    get icon
-// @route   get /api/media/getIcon
-// @access  Private
-const getIcon = asyncHandler(async (req, res, next) => {
-  try {
-    const key = req.params.key;
-    // const readStream = getFile(key);
-    // readStream.pipe(res);
-  } catch (err) {
-    console.log(err);
-    next(err);
+const updateMediaFolder = asyncHandler(async (req, res, next) => {
+  const { name, mediaType } = req.body;
+  const folder = await MediaFolder.findById(req.params.id);
+  if (!folder) {
+    return res.status(404).json({ message: "Folder not found" });
   }
+  if (name) folder.name = name;
+  if (mediaType) folder.mediaType = mediaType;
+  await folder.save();
+  res.status(200).json({ folder, message: "Folder updated successfully" });
 });
 
-// @desc    upload image
-// @route   post /api/media/uploadImage
-// @access  Private
-const uploadImage = asyncHandler(async (req, res, next) => {
-  try {
-    const file = req.file;
-    const user = req.user;
-    const uploadedFile = await uploadFile(file);
-
-    const f = await MediaFiles.create({
-      user: user._id,
-      filename: file.filename,
-      filelink: uploadedFile.Location,
-      foldername: "images",
-    });
-
-    await unLinkFile(file.filename);
-    res.status(200).json({ file: f, message: "sucess" });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
+const getAllMediaFolders = asyncHandler(async (req, res, next) => {
+  const folders = await MediaFolder.find({});
+  res.status(200).json({ folders });
 });
 
-// @desc    upload rc files
-// @route   post /api/media/uploadRcFile
-// @access  Private
-const uploadRcFile = asyncHandler(async (req, res, next) => {
-  try {
-    const file = req.file;
-    const user = req.user;
-    const foldername = req.params.foldername;
-
-    const results = await uploadFile(file);
-    await unLinkFile(file.filename);
-    const f = await MediaFiles.create({
-      user: user._id,
-      filename: file.originalname,
-      filelink: file.filename,
-      foldername: foldername,
-    });
-    res.status(200).json({ file: f, message: "sucess" });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
+const getUserMediaFolders = asyncHandler(async (req, res, next) => {
+  const folders = await MediaFolder.find({ user: req.user._id });
+  res.status(200).json({ folders });
 });
 
-// @desc    upload music
-// @route   post /api/media/uploadMusic
-// @access  Private
-const uploadMusic = asyncHandler(async (req, res, next) => {
-  try {
-    const file = req.file;
-    const user = req.user;
-    const uploadedFile = await uploadFile(file);
+const uploadMediaFile = asyncHandler(async (req, res, next) => {
+  const folderId = req.params.folderId;
+  const user = req.user;
+  const file = req.file;
 
-    const f = await MediaFiles.create({
-      user: user._id,
-      filename: file.filename,
-      filelink: uploadedFile.Location,
-      foldername: "musics",
-    });
-
-    await unLinkFile(file.filename);
-    res.status(200).json({ file: f, message: "sucess" });
-  } catch (err) {
-    console.log(err);
-    next(err);
+  if (!file) {
+    return res.status(400).json({ message: "No file uploaded" });
   }
+
+  const folder = await MediaFolder.findById(folderId);
+  if (!folder) {
+    return res.status(404).json({ message: "Folder not found" });
+  }
+
+  const { Location } = await uploadFile(file, folderId);
+
+  await unLinkFile(file.filename);
+  const filelink = Location;
+
+  const mediaFile = await MediaFiles.create({
+    user: user._id,
+    folderId: folderId,
+    filename: file.filename,
+    originalName: file.originalname,
+    filelink: filelink,
+    mediaType: folder.mediaType, // or detect from file.mimetype
+  });
+
+  res.status(201).json({ mediaFile, message: "File uploaded successfully" });
 });
 
-const uploadDocument = asyncHandler(async (req, res, next) => {
-  try {
-    const file = req.file;
-    const user = req.user;
-    const f = await MediaFiles.create({
-      user: user._id,
-      filename: file.originalname,
-      filelink: file.filename,
-      foldername: "docs",
-    });
-    res.status(200).json({ file: f, message: "sucess" });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
+const getMediaFolderFiles = asyncHandler(async (req, res, next) => {
+  const folderId = req.params.folderId;
+  const files = await MediaFiles.find({ folderId });
+  res.status(200).json({ files });
 });
 
-// @desc    get document
-// @route   get /api/media/getDoc
-// @access  Private
-const getDoc = asyncHandler(async (req, res, next) => {
-  try {
-    const key = req.params.key;
-    // const readStream = getFile(key);
-    //
-    readStream.pipe(res);
-  } catch (err) {
-    console.log(err);
-    next(err);
+const deleteMediaFile = asyncHandler(async (req, res, next) => {
+  const { folderId, fileId } = req.params;
+  const file = await MediaFiles.findOne({ _id: fileId, folderId });
+  if (!file) {
+    return res.status(404).json({ message: "File not found" });
   }
+
+  await deleteFile(folderId, file.filename);
+
+  await file.remove();
+  res.status(200).json({ message: "File deleted successfully" });
 });
 
-// @desc    get music
-// @route   get /api/media/getMusic
-// @access  Private
-const getMusic = asyncHandler(async (req, res, next) => {
-  try {
-    const key = req.params.key;
-    // const readStream = getFile(key);
-    //
-    readStream.pipe(res);
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
+// const destroy = asyncHandler(async (req, res, next) => {
+//   try {
+//     await MediaFiles.deleteMany({});
+//     res
+//       .status(200)
+//       .send({ status: "Successfully removed all documents from media files" });
+//   } catch (err) {
+//     console.log(err);
+//     next(err);
+//   }
+// });
 
-// @desc    get video
-// @route   get /api/media/getVideo
-// @access  Private
-const getVideo = asyncHandler(async (req, res, next) => {
-  try {
-    const key = req.params.key;
-    // const readStream = getFile(key);
-    //
-    readStream.pipe(res);
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-// @desc    get voice over
-// @route   get /api/media/voiceOver
-// @access  Private
-const getVoiceOver = asyncHandler(async (req, res, next) => {
-  try {
-    const key = req.params.key;
-    // const readStream = getFile(key);
-    //
-    readStream.pipe(res);
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-// @desc    upload video
-// @route   post /api/media/uploadVideo
-// @access  Private
-const uploadVideo = asyncHandler(async (req, res, next) => {
-  try {
-    const file = req.file;
-    const fileType = file.originalname.split(".").pop();
-    const user = req.user;
-    const results = await uploadVideoFile(file, fileType);
-    await unLinkFile(file.filename);
-    console.log(results);
-    const f = await MediaFiles.create({
-      user: user._id,
-      filename: file.filename,
-      filelink: results.Location,
-      foldername: "videos",
-    });
-    // console.log(file);
-    // console.log(fileType);
-    // console.log("results", results);
-    res.status(200).json({ file: f, message: "sucess" });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-// @desc    upload voice over
-// @route   post /api/media/uploadVoiceOver
-// @access  Private
-const uploadVoiceOver = asyncHandler(async (req, res, next) => {
-  try {
-    const file = req.file;
-    const user = req.user;
-    const uploadedFile = await uploadFile(file);
-
-    const f = await MediaFiles.create({
-      user: user._id,
-      filename: file.filename,
-      filelink: uploadedFile.Location,
-      foldername: "voiceOvers",
-    });
-
-    await unLinkFile(file.filename);
-    res.status(200).json({ file: f, message: "sucess" });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-// @desc    upload foods
-// @route   post /api/media/foods
-// @access  Private
-const uploadFoodfiles = asyncHandler(async (req, res, next) => {
-  try {
-    const file = req.file;
-    const user = req.user;
-    // const results = await uploadFile(file);
-
-    // await unLinkFile(file.filename);
-    // console.log(results);
-    const f = await MediaFiles.create({
-      user: user._id,
-      filename: file.originalname,
-      filelink: file.filename,
-      foldername: "foods",
-    });
-    console.log(f);
-    res.status(200).json({ file: f, message: "sucess" });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-// @desc    upload icons
-// @route   post /api/media/icons
-// @access  Private
-const uploadIconfiles = asyncHandler(async (req, res, next) => {
-  try {
-    const file = req.file;
-    const user = req.user;
-    // const results = await uploadFile(file);
-
-    // await unLinkFile(file.filename);
-    // console.log(results);
-    const f = await MediaFiles.create({
-      user: user._id,
-      filename: file.originalname,
-      filelink: file.filename,
-      foldername: "icons",
-    });
-    // console.log(f);
-    res.status(200).json({ file: f, message: "sucess" });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-// @desc    upload temps
-// @route   post /api/media/temps
-// @access  Private
-const uploadTempfiles = asyncHandler(async (req, res, next) => {
-  try {
-    const file = req.file;
-    const user = req.user;
-    // const results = await uploadFile(file);
-
-    // await unLinkFile(file.filename);
-    // console.log(results);
-    const f = await MediaFiles.create({
-      user: user._id,
-      filename: file.originalname,
-      filelink: file.filename,
-      foldername: "temps",
-    });
-    console.log(f);
-    res.status(200).json({ file: f, message: "sucess" });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-// @desc   get all vides
-// @route   get /api/media/get/videos/all
-// @access  private
-const getAllVideos = asyncHandler(async (req, res, next) => {
-  try {
-    let files;
-    if (req.user.role === "admin") {
-      files = await MediaFiles.find({ foldername: "videos" });
-    } else {
-      files = await MediaFiles.find({
-        foldername: "videos",
-        user: req.user.id,
-      });
-    }
-
-    res.status(200).json({ videos: files });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-// @desc   get all musics
-// @route   get /api/media/get/musics/all
-// @access  private
-const getAllMusics = asyncHandler(async (req, res, next) => {
-  try {
-    let files;
-    if (req.user.role === "admin") {
-      files = await MediaFiles.find({ foldername: "musics" });
-    } else {
-      files = await MediaFiles.find({
-        foldername: "musics",
-        user: req.user.id,
-      });
-    }
-    res.status(200).json({ musics: files });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-// @desc   get all images
-// @route   get /api/media/get/images/all
-// @access  private
-const getAllImages = asyncHandler(async (req, res, next) => {
-  try {
-    let files;
-    if (req.user.role === "admin") {
-      files = await MediaFiles.find({ foldername: "images" });
-    } else {
-      files = await MediaFiles.find({
-        foldername: "images",
-        user: req.user.id,
-      });
-    }
-    res.status(200).json({ images: files });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-const getAllRcFiles = asyncHandler(async (req, res, next) => {
-  try {
-    const foldername = req.params.foldername;
-    let files;
-    if (req.user.role === "admin") {
-      files = await MediaFiles.find({ foldername: foldername });
-    } else {
-      files = await MediaFiles.find({
-        foldername: foldername,
-        user: req.user.id,
-      });
-    }
-    res.status(200).json({ files: files });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-// @route   get api/media/get/docs/all
-// @access  private
-const getAllDocs = asyncHandler(async (req, res, next) => {
-  try {
-    let files;
-    if (req.user.role === "admin") {
-      files = await MediaFiles.find({ foldername: "docs" });
-    } else {
-      files = await MediaFiles.find({
-        foldername: "docs",
-        user: req.user.id,
-      });
-    }
-
-    res.status(200).json({ docs: files });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-// @route   get api/media/get/voiceOvers/alll
-// @access  private
-const getAllVoiceOvers = asyncHandler(async (req, res, next) => {
-  try {
-    let files;
-    if (req.user.role === "admin") {
-      files = await MediaFiles.find({ foldername: "voiceOvers" });
-    } else {
-      files = await MediaFiles.find({
-        foldername: "voiceOvers",
-        user: req.user.id,
-      });
-    }
-
-    res.status(200).json({ voiceOvers: files });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-// @route   get api/media/get/icons/alll
-// @access  private
-const getAllIcons = asyncHandler(async (req, res, next) => {
-  try {
-    let files;
-    if (req.user.role === "admin") {
-      files = await MediaFiles.find({ foldername: "icons" });
-    } else {
-      files = await MediaFiles.find({
-        foldername: "icons",
-        user: req.user.id,
-      });
-    }
-    res.status(200).json({ files: files });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-// @route   get api/media/get/temps/alll
-// @access  private
-const getAllTemps = asyncHandler(async (req, res, next) => {
-  try {
-    let files;
-    if (req.user.role === "admin") {
-      files = await MediaFiles.find({ foldername: "temps" });
-    } else {
-      files = await MediaFiles.find({
-        foldername: "temps",
-        user: req.user.id,
-      });
-    }
-
-    res.status(200).json({ files: files });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-// @route   get api/media/get/foods/alll
-// @access  private
-const getAllFoods = asyncHandler(async (req, res, next) => {
-  try {
-    let files;
-    if (req.user.role === "admin") {
-      files = await MediaFiles.find({ foldername: "foods" });
-    } else {
-      files = await MediaFiles.find({
-        foldername: "foods",
-        user: req.user.id,
-      });
-    }
-
-    res.status(200).json({ files: files });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-// @desc   delete files from s3 and databases
-// @route   dete /files
-// @access  private
-const deleteMediaFiles = asyncHandler(async (req, res, next) => {
-  try {
-    const files = req.body;
-
-    files &&
-      files.map(async (f) => {
-        console.log("ammar", f);
-        // const a = await MediaFiles.deleteOne({ _id: f.id });
-        var parts = f.link.split("/");
-        var id = parts[parts.length - 1];
-        // const res = await deleteFile(id);
-        // unLinkFile(`./uploads/${f.link}`);
-      });
-    console.log("yesss", files);
-
-    res.status(200).send({ status: "success", deleted: req.body });
-    //   res.status(200).json({ images: files });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
-
-const destroy = asyncHandler(async (req, res, next) => {
-  try {
-    await MediaFiles.deleteMany({});
-    res
-      .status(200)
-      .send({ status: "Successfully removed all documents from media files" });
-  } catch (err) {
-    console.log(err);
-    next(err);
-  }
-});
 module.exports = {
   testMediaRoute,
-  uploadImage,
-  uploadVideo,
-  getImage,
-  getVideo,
-  getTemp,
-  getIcon,
-  getFood,
-  getAllVideos,
-  getAllImages,
-  deleteMediaFiles,
-  getAllDocs,
-  uploadDocument,
-  getDoc,
-  getAllVoiceOvers,
-  uploadVoiceOver,
-  getVoiceOver,
-  getMusic,
-  getAllMusics,
-  uploadMusic,
-  uploadTempfiles,
-  uploadFoodfiles,
-  uploadIconfiles,
-  uploadRcFile,
-  getAllFoods,
-  getAllTemps,
-  getAllIcons,
-  getRcFile,
-  getAllRcFiles,
-  destroy,
+  createMediaFolder,
+  getMediaFolder,
+  deleteMediaFolder,
+  updateMediaFolder,
+  getAllMediaFolders,
+  getUserMediaFolders,
+  uploadMediaFile,
+  getMediaFolderFiles,
+  deleteMediaFile,
 };

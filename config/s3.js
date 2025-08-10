@@ -15,12 +15,10 @@ const s3 = new S3({
 });
 
 // upload a file to s3
-function uploadFile(file) {
+function uploadFile(file, folderId) {
   const fileStream = fs.createReadStream(file.path);
 
   let contentType = "application/octet-stream";
-
-  console.log("uploading file", bucketName, bucketRegion, accessKey, secretKey);
 
   if (file.mimetype) {
     contentType = file.mimetype;
@@ -29,59 +27,48 @@ function uploadFile(file) {
   const uploadParams = {
     Bucket: bucketName,
     Body: fileStream,
-    Key: file.filename,
+    Key: `${folderId}/${file.filename}`, // folderId is unique
     ContentType: contentType,
   };
   return s3.upload(uploadParams).promise();
 }
 
-exports.uploadFile = uploadFile;
+async function deleteFolderFromS3(folderPrefix) {
+  // 1. List all objects with the prefix
+  const listedObjects = await s3
+    .listObjectsV2({
+      Bucket: bucketName,
+      Prefix: folderPrefix + "/", // e.g. "myfolder/"
+    })
+    .promise();
 
-//upload a video
-// upload a file to s3
-function uploadVideoFile(file, type) {
-  const fileStream = fs.createReadStream(file.path);
-  //   console.log(fileStream);
-  console.log(bucketName);
-  const uploadParams = {
-    Bucket: bucketName,
-    Body: fileStream,
-    Key: `${file.filename}.${type}`,
-    ContentType: "video/mp4",
-  };
-  return s3.upload(uploadParams).promise();
-}
-// const uploadVideoFile = multer({
-//   storage: multerS3({
-//     s3: s3,
-//     bucket: 'some-bucket',
-//     metadata: function (req, file, cb) {
-//       cb(null, {fieldName: file.fieldname});
-//     },
-//     key: function (req, file, cb) {
-//       cb(null, Date.now().toString())
-//     }
-//   })
-// })
+  if (!listedObjects.Contents.length) return;
 
-exports.uploadVideoFile = uploadVideoFile;
-
-// get a file from s3
-function getFile(fileKey, folder) {
-  console.log("who", fileKey, folder);
-  const file = fs.readFile(`/uploads/${folder}/${fileKey}`);
-  console.log("file", file);
-  return file;
-}
-
-exports.getFile = getFile;
-
-function deleteFile(filekey) {
+  // 2. Prepare objects for deletion
   const deleteParams = {
-    Key: filekey,
+    Bucket: bucketName,
+    Delete: { Objects: [] },
+  };
+
+  listedObjects.Contents.forEach(({ Key }) => {
+    deleteParams.Delete.Objects.push({ Key });
+  });
+
+  // 3. Delete all objects
+  await s3.deleteObjects(deleteParams).promise();
+
+  // If there are more objects, recursively delete
+  if (listedObjects.IsTruncated) await deleteFolderFromS3(folderPrefix);
+}
+
+function deleteFile(folderId, fileName) {
+  const deleteParams = {
+    Key: `${folderId}/${fileName}`,
     Bucket: bucketName,
   };
   return s3.deleteObject(deleteParams).promise();
 }
 
+exports.deleteFolderFromS3 = deleteFolderFromS3;
 exports.deleteFile = deleteFile;
+exports.uploadFile = uploadFile;

@@ -12,6 +12,7 @@ const crypto = require("crypto");
 const smtpTransport = require("nodemailer-smtp-transport");
 const nodemailer = require("nodemailer");
 const aws = require("aws-sdk");
+const MediaFolder = require("../../models/MediaManagerModels/mediaFolderModel");
 
 const sesConfig = {
   accessKeyId: process.env.AWS_SES_KEY,
@@ -692,6 +693,23 @@ const createUser = asyncHandler(async (req, res, next) => {
     if (!newUser) {
       return res.status(400).json("User cannot be created!");
     } else {
+      if (newUser.role !== "customer") {
+        const defaultFolders = [
+          { name: "Videos", mediaType: "video" },
+          { name: "Audios", mediaType: "audio" },
+          { name: "Pictures", mediaType: "picture" },
+          { name: "Documents", mediaType: "document" },
+          { name: "Other", mediaType: "other" },
+        ];
+
+        await MediaFolder.insertMany(
+          defaultFolders.map((folder) => ({
+            ...folder,
+            user: newUser._id,
+          }))
+        );
+      }
+
       return res.status(201).json({
         mesage: "User Created Successfully",
         _id: newUser._id,

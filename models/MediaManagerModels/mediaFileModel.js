@@ -1,28 +1,37 @@
 const mongoose = require("mongoose");
-// const userRole = require("../models/userRoles");
 
 const mediaFileSchema = mongoose.Schema({
   user: {
-    // in this way each bootcamp is realated to each user
     type: mongoose.Schema.ObjectId,
     ref: "User",
-    require: true,
+    required: true,
   },
-  foldername: {
-    type: String,
+  folderId: {
+    type: mongoose.Schema.ObjectId,
+    ref: "MediaFolder",
     required: true,
   },
   filename: {
     type: String,
     required: true,
   },
+  originalName: {
+    type: String,
+    required: false,
+  },
   filelink: {
     type: String,
     required: true,
+  },
+  mediaType: {
+    type: String,
+    enum: ["video", "audio", "picture", "document", "other"],
+    required: false,
   },
   createdAt: {
     type: Date,
     default: Date.now,
   },
 });
+
 module.exports = mongoose.model("MediaFiles", mediaFileSchema);
