@@ -28,10 +28,17 @@ const mediaFileSchema = mongoose.Schema({
     enum: ["video", "audio", "picture", "document", "other"],
     required: false,
   },
+  size: {
+    type: Number,
+    required: false,
+  },
   createdAt: {
     type: Date,
     default: Date.now,
   },
 });
+
+// Ensure unique filenames per folder
+mediaFileSchema.index({ folderId: 1, originalName: 1 }, { unique: true });
 
 module.exports = mongoose.model("MediaFiles", mediaFileSchema);
