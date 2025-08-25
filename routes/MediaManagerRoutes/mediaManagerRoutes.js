@@ -1,5 +1,25 @@
+// Add these routes to your existing media routes file
+
 const express = require("express");
 const router = express.Router();
+const { protect, admin } = require("../../middlewares/authMiddleware"); // Assuming you have admin middleware
+
+const {
+  testMediaRoute,
+  createMediaFolder,
+  getMediaFolder,
+  deleteMediaFolder,
+  updateMediaFolder,
+  getAllMediaFolders,
+  getAllMediaFoldersGroupedByUser, // New admin function
+  getSpecificUserFolders, // New admin function
+  getUserMediaFolders,
+  uploadMediaFile,
+  getMediaFolderFiles,
+  deleteMediaFile,
+  updateMediaFile,
+  moveMediaFile,
+} = require("../../controllers/MediaControllers/mediaController");
 const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
 
@@ -15,45 +35,36 @@ const uploadFile = multer({
   }),
 });
 
-const {
-  testMediaRoute,
-  createMediaFolder,
-  getMediaFolder,
-  deleteMediaFolder,
-  updateMediaFolder,
-  getAllMediaFolders,
-  getUserMediaFolders,
-  uploadMediaFile,
-  getMediaFolderFiles,
-  deleteMediaFile,
-  updateMediaFile, // New
-  moveMediaFile,
-} = require("../../controllers/MediaControllers/mediaController");
+// Test route
+router.get("/", protect, testMediaRoute);
 
-const { protect, admin } = require("../../middlewares/authMiddleware");
+// --- FOLDER ROUTES ---
+router.post("/folder", protect, createMediaFolder);
+router.get("/folder/:id", protect, getMediaFolder);
+router.put("/folder/:id", protect, updateMediaFolder);
+router.delete("/folder/:id", protect, deleteMediaFolder);
 
-router.route("/").get(protect, testMediaRoute);
+// --- ADMIN FOLDER ROUTES ---
+// Get all folders grouped by users (admin only) - NEW ROUTE
+router.get("/folders/admin", protect, admin, getAllMediaFoldersGroupedByUser);
 
-// Folder routes
-router.route("/folder").post(protect, createMediaFolder);
-router.route("/folder/:id").get(protect, getMediaFolder);
-router.route("/folder/:id").delete(protect, deleteMediaFolder);
-router.route("/folder/:id").put(protect, updateMediaFolder);
-router.route("/folders").get(protect, admin, getAllMediaFolders);
-router.route("/folders/user").get(protect, getUserMediaFolders);
+// Get specific user's folders (admin only) - NEW ROUTE
+router.get("/folders/user/:userId", protect, admin, getSpecificUserFolders);
 
-// File routes
+// Get all folders (admin only) - original route for backward compatibility
+router.get("/folders", protect, admin, getAllMediaFolders);
+
+// Get current user's folders
+router.get("/folders/user", protect, getUserMediaFolders);
+
+// --- FILE ROUTES ---
 router
   .route("/folders/:folderId")
   .post(protect, uploadFile.single("file"), uploadMediaFile);
-router.route("/folders/:folderId/files").get(protect, getMediaFolderFiles);
-router
-  .route("/folders/:folderId/files/:fileId")
-  .delete(protect, deleteMediaFile)
-  .put(protect, updateMediaFile); // New route for renaming files
 
-router
-  .route("/folders/:folderId/files/:fileId/move")
-  .put(protect, moveMediaFile);
+router.get("/folders/:folderId/files", protect, getMediaFolderFiles);
+router.delete("/folders/:folderId/files/:fileId", protect, deleteMediaFile);
+router.put("/folders/:folderId/files/:fileId", protect, updateMediaFile);
+router.put("/folders/:folderId/files/:fileId/move", protect, moveMediaFile);
 
 module.exports = router;
