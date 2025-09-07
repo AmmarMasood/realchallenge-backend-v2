@@ -29,6 +29,9 @@ const workoutSchema = mongoose.Schema(
     introVideoLink: {
       type: String,
     },
+    introVideoThumbnailLink: {
+      type: String,
+    },
     introVideoLength: {
       type: Number,
     },

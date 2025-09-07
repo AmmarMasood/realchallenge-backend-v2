@@ -7,6 +7,7 @@ const bucketName = process.env.AWS_BUCKET_NAME;
 const bucketRegion = process.env.AWS_BUCKET_REGION;
 const accessKey = process.env.AWS_BUCKET_ACCESS;
 const secretKey = process.env.AWS_BUCKET_SECRET;
+const cloudFrontDomain = process.env.CLOUDFRONT_DOMAIN;
 
 const s3 = new S3({
   region: bucketRegion,
@@ -14,7 +15,16 @@ const s3 = new S3({
   secretAccessKey: secretKey,
 });
 
-// upload a file to s3
+// Helper function to convert S3 URL to CloudFront URL
+function getCloudFrontUrl(s3Key) {
+  if (cloudFrontDomain) {
+    return `https://${cloudFrontDomain}/${s3Key}`;
+  }
+  // Fallback to S3 URL if CloudFront not configured
+  return `https://${bucketName}.s3.${bucketRegion}.amazonaws.com/${s3Key}`;
+}
+
+// upload a file to s3 with optimized settings for video streaming
 function uploadFile(file, folderId) {
   const fileStream = fs.createReadStream(file.path);
 
@@ -29,7 +39,20 @@ function uploadFile(file, folderId) {
     Body: fileStream,
     Key: `${folderId}/${file.filename}`, // folderId is unique
     ContentType: contentType,
+    // Optimize for video streaming
+    CacheControl: contentType.startsWith("video/")
+      ? "max-age=31536000, public"
+      : "max-age=86400, public", // 1 year for videos, 1 day for others
+    Metadata: {
+      "optimized-for-streaming": "true",
+    },
   };
+
+  // Add additional headers for video files to support range requests
+  if (contentType.startsWith("video/")) {
+    uploadParams.ContentDisposition = "inline";
+    uploadParams.AcceptRanges = "bytes";
+  }
   return s3.upload(uploadParams).promise();
 }
 
@@ -69,6 +92,17 @@ function deleteFile(folderId, fileName) {
   return s3.deleteObject(deleteParams).promise();
 }
 
+// Delete thumbnail file from S3
+function deleteThumbnailFile(folderId, thumbnailFileName) {
+  const deleteParams = {
+    Key: `${folderId}/${thumbnailFileName}`,
+    Bucket: bucketName,
+  };
+  return s3.deleteObject(deleteParams).promise();
+}
+
 exports.deleteFolderFromS3 = deleteFolderFromS3;
 exports.deleteFile = deleteFile;
+exports.deleteThumbnailFile = deleteThumbnailFile;
 exports.uploadFile = uploadFile;
+exports.getCloudFrontUrl = getCloudFrontUrl;

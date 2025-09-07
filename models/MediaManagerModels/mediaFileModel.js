@@ -32,6 +32,10 @@ const mediaFileSchema = mongoose.Schema({
     type: Number,
     required: false,
   },
+  thumbnailUrl: {
+    type: String,
+    required: false,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

@@ -59,6 +59,7 @@ const createWorkout = asyncHandler(async (workout) => {
       infoFile: workout.infoFile,
       relatedProducts: workout.relatedProducts, //ids aayegi
       introVideoLink: workout.introVideoLink,
+      introVideoThumbnailLink: workout.introVideoThumbnailLink, //a
       introVideoLength: workout.introVideoLength,
       relatedEquipments: workout.relatedEquipments,
       isRendered: workout.isRendered,
@@ -153,6 +154,9 @@ const updateWorkout = asyncHandler(async (req, res, next) => {
         introVideoLink: req.body.introVideoLink
           ? req.body.introVideoLink
           : oldWorkout.introVideoLink,
+        introVideoThumbnailLink: req.body.introVideoThumbnailLink
+          ? req.body.introVideoThumbnailLink
+          : oldWorkout.introVideoThumbnailLink,
         introVideoLength: req.body.introVideoLength
           ? req.body.introVideoLength
           : oldWorkout.introVideoLength,

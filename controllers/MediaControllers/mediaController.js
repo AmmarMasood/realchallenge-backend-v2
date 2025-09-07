@@ -3,9 +3,13 @@ const {
   uploadFile,
   deleteFile,
   deleteFolderFromS3,
+  deleteThumbnailFile,
+  getCloudFrontUrl,
 } = require("../../config/s3");
 const fs = require("fs");
 const path = require("path");
+const ThumbnailService = require("../../services/thumbnailService");
+const VideoOptimizationService = require("../../services/videoOptimizationService");
 
 const MediaFiles = require("../../models/MediaManagerModels/mediaFileModel");
 const MediaFolder = require("../../models/MediaManagerModels/mediaFolderModel");
@@ -116,12 +120,14 @@ const getMediaFolder = asyncHandler(async (req, res, next) => {
 // @route   DELETE /api/media/folder/:id
 // @access  private
 const deleteMediaFolder = asyncHandler(async (req, res, next) => {
+  const isAdmin = req.user && req.user.role === "admin";
   const folder = await MediaFolder.findById(req.params.id);
   if (!folder) {
     return res.status(404).json({ message: "Folder not found" });
   }
 
-  if (folder.user.toString() !== req.user._id.toString()) {
+  // Allow if owner OR admin
+  if (folder.user.toString() !== req.user._id.toString() && !isAdmin) {
     return res.status(403).json({ message: "Access denied" });
   }
 
@@ -368,17 +374,85 @@ const uploadMediaFile = asyncHandler(async (req, res, next) => {
       .json({ message: "A file with this name already exists in this folder" });
   }
 
-  const { Location } = await uploadFile(file, folderId);
+  let finalFile = file;
+  let uploadResult;
+
+  // Optimize video files before upload
+  if (VideoOptimizationService.isVideoFile(file.mimetype)) {
+    try {
+      console.log("Optimizing video for streaming:", file.originalname);
+      const optimizedResult =
+        await VideoOptimizationService.processVideoForStreaming(
+          file,
+          path.dirname(file.path)
+        );
+
+      // Create a new file object for the optimized video
+      finalFile = {
+        ...file,
+        path: optimizedResult.optimizedPath,
+        filename: optimizedResult.optimizedFilename,
+        size: fs.statSync(optimizedResult.optimizedPath).size,
+      };
+
+      console.log("Video optimization completed");
+    } catch (optimizationError) {
+      console.error(
+        "Video optimization failed, using original:",
+        optimizationError
+      );
+      // Continue with original file if optimization fails
+    }
+  }
+
+  uploadResult = await uploadFile(finalFile, folderId);
+
+  // Convert S3 URL to CloudFront URL for better performance
+  const s3Key = `${folderId}/${finalFile.filename}`;
+  const cloudFrontUrl = getCloudFrontUrl(s3Key);
+
+  // Initialize thumbnail URL
+  let thumbnailUrl = null;
+
+  // Generate thumbnail for video files BEFORE unlinking
+  if (ThumbnailService.isVideoFile(file.mimetype)) {
+    try {
+      console.log("Generating thumbnail for video file:", file.originalname);
+      const thumbnailS3Url = await ThumbnailService.generateVideoThumbnail(
+        file,
+        folderId
+      );
+
+      // Convert thumbnail S3 URL to CloudFront URL if possible
+      if (thumbnailS3Url) {
+        const thumbnailFilename = ThumbnailService.getThumbnailFilename(
+          file.filename
+        );
+        const thumbnailS3Key = `${folderId}/${thumbnailFilename}`;
+        thumbnailUrl = getCloudFrontUrl(thumbnailS3Key);
+      }
+      console.log("Thumbnail generated successfully:", thumbnailUrl);
+    } catch (thumbnailError) {
+      console.error("Error generating thumbnail:", thumbnailError);
+      // Continue with file upload even if thumbnail generation fails
+    }
+  }
+
+  // Clean up temporary files
   await unLinkFile(file.filename);
+  if (finalFile.path !== file.path) {
+    await unLinkFile(finalFile.filename);
+  }
 
   const mediaFile = await MediaFiles.create({
     user: folder.user, // Use folder owner as file owner
     folderId: folderId,
-    filename: file.filename,
+    filename: finalFile.filename,
     originalName: file.originalname,
-    filelink: Location,
+    filelink: cloudFrontUrl, // Use CloudFront URL instead of S3 URL
     mediaType: folder.mediaType,
-    size: file.size,
+    size: finalFile.size,
+    thumbnailUrl: thumbnailUrl,
   });
 
   res.status(201).json({ mediaFile, message: "File uploaded successfully" });
@@ -423,7 +497,23 @@ const deleteMediaFile = asyncHandler(async (req, res, next) => {
     return res.status(403).json({ message: "Access denied" });
   }
 
+  // Delete the main file from S3
   await deleteFile(folderId, file.filename);
+
+  // Delete thumbnail if it exists
+  if (file.thumbnailUrl && file.mediaType === "video") {
+    try {
+      const thumbnailFilename = ThumbnailService.getThumbnailFilename(
+        file.filename
+      );
+      await deleteThumbnailFile(folderId, thumbnailFilename);
+      console.log("Thumbnail deleted successfully");
+    } catch (thumbnailError) {
+      console.error("Error deleting thumbnail:", thumbnailError);
+      // Continue with file deletion even if thumbnail deletion fails
+    }
+  }
+
   await file.remove();
   res.status(200).json({ message: "File deleted successfully" });
 });
@@ -524,6 +614,159 @@ const moveMediaFile = asyncHandler(async (req, res, next) => {
   });
 });
 
+// @desc    Debug CloudFront performance
+// @route   POST /api/media/debug/cloudfront
+// @access  private
+const debugCloudFrontPerformance = asyncHandler(async (req, res, next) => {
+  const { url } = req.body;
+
+  if (!url) {
+    return res.status(400).json({ message: "URL required for testing" });
+  }
+
+  console.log(`Testing CloudFront performance for: ${url}`);
+  const startTime = Date.now();
+
+  try {
+    // Test with fetch (Node.js 18+ or install node-fetch)
+    // const fetch = require("node-fetch"); // You might need to install: npm install node-fetch
+
+    const response = await fetch(url, {
+      method: "HEAD",
+      headers: {
+        Range: "bytes=0-1023", // Test range request support
+        "User-Agent": "CloudFront-Debug-Tool/1.0",
+      },
+    });
+
+    const endTime = Date.now();
+    const responseTime = endTime - startTime;
+
+    // Get all response headers
+    const headers = {};
+    response.headers.forEach((value, key) => {
+      headers[key] = value;
+    });
+
+    res.json({
+      url: url,
+      responseTime: responseTime + "ms",
+      status: response.status,
+      statusText: response.statusText,
+      importantHeaders: {
+        "x-amz-cf-pop": headers["x-amz-cf-pop"] || "Not found",
+        "x-cache": headers["x-cache"] || "Not found",
+        "x-amz-cf-id": headers["x-amz-cf-id"] || "Not found",
+        age: headers["age"] || "Not found",
+        "cache-control": headers["cache-control"] || "Not found",
+        "accept-ranges": headers["accept-ranges"] || "Not found",
+        "content-type": headers["content-type"] || "Not found",
+        "content-length": headers["content-length"] || "Not found",
+        "last-modified": headers["last-modified"] || "Not found",
+        etag: headers["etag"] || "Not found",
+      },
+      allHeaders: headers,
+      edgeLocation: headers["x-amz-cf-pop"] || "Unknown",
+      cacheStatus: headers["x-cache"] || "Unknown",
+      performance: {
+        responseTime,
+        isGoodPerformance: responseTime < 500,
+        recommendation:
+          responseTime > 1000
+            ? "Very slow - check configuration"
+            : responseTime > 500
+            ? "Slow - could be improved"
+            : "Good performance",
+      },
+    });
+  } catch (error) {
+    const endTime = Date.now();
+    const responseTime = endTime - startTime;
+
+    res.status(500).json({
+      error: error.message,
+      responseTime: responseTime + "ms",
+      url: url,
+      recommendation: "Request failed - check URL or network connectivity",
+    });
+  }
+});
+
+const compareS3vsCloudFront = asyncHandler(async (req, res, next) => {
+  const { fileId } = req.body;
+
+  if (!fileId) {
+    return res.status(400).json({ message: "File ID required for comparison" });
+  }
+
+  const file = await MediaFiles.findById(fileId);
+  if (!file) {
+    return res.status(404).json({ message: "File not found" });
+  }
+
+  // Generate S3 direct URL (you'll need to modify this based on your S3 setup)
+  const s3DirectUrl = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_BUCKET_REGION}.amazonaws.com/${file.folderId}/${file.filename}`;
+  const cloudFrontUrl = file.filelink;
+
+  const fetch = require("node-fetch");
+
+  try {
+    // Test S3 direct
+    const s3StartTime = Date.now();
+    const s3Response = await fetch(s3DirectUrl, { method: "HEAD" });
+    const s3EndTime = Date.now();
+    const s3ResponseTime = s3EndTime - s3StartTime;
+
+    // Test CloudFront
+    const cfStartTime = Date.now();
+    const cfResponse = await fetch(cloudFrontUrl, { method: "HEAD" });
+    const cfEndTime = Date.now();
+    const cfResponseTime = cfEndTime - cfStartTime;
+
+    // Get CloudFront headers
+    const cfHeaders = {};
+    cfResponse.headers.forEach((value, key) => {
+      cfHeaders[key] = value;
+    });
+
+    res.json({
+      fileInfo: {
+        id: file._id,
+        filename: file.filename,
+        originalName: file.originalName,
+        size: file.size,
+        mediaType: file.mediaType,
+      },
+      s3Direct: {
+        url: s3DirectUrl,
+        responseTime: s3ResponseTime + "ms",
+        status: s3Response.status,
+      },
+      cloudFront: {
+        url: cloudFrontUrl,
+        responseTime: cfResponseTime + "ms",
+        status: cfResponse.status,
+        edgeLocation: cfHeaders["x-amz-cf-pop"] || "Unknown",
+        cacheStatus: cfHeaders["x-cache"] || "Unknown",
+        cacheAge: cfHeaders["age"] || "Unknown",
+      },
+      comparison: {
+        s3Faster: s3ResponseTime < cfResponseTime,
+        difference: Math.abs(s3ResponseTime - cfResponseTime) + "ms",
+        recommendation:
+          s3ResponseTime < cfResponseTime
+            ? "S3 is faster - CloudFront needs optimization"
+            : "CloudFront is faster - working as expected",
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error.message,
+      message: "Failed to compare performance",
+    });
+  }
+});
+
 module.exports = {
   testMediaRoute,
   createMediaFolder,
@@ -539,4 +782,6 @@ module.exports = {
   deleteMediaFile,
   updateMediaFile,
   moveMediaFile,
+  compareS3vsCloudFront,
+  debugCloudFrontPerformance,
 };

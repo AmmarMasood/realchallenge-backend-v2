@@ -19,6 +19,8 @@ const {
   deleteMediaFile,
   updateMediaFile,
   moveMediaFile,
+  debugCloudFrontPerformance,
+  compareS3vsCloudFront,
 } = require("../../controllers/MediaControllers/mediaController");
 const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
@@ -66,5 +68,8 @@ router.get("/folders/:folderId/files", protect, getMediaFolderFiles);
 router.delete("/folders/:folderId/files/:fileId", protect, deleteMediaFile);
 router.put("/folders/:folderId/files/:fileId", protect, updateMediaFile);
 router.put("/folders/:folderId/files/:fileId/move", protect, moveMediaFile);
+
+router.post("/debug/cloudfront", debugCloudFrontPerformance);
+router.post("/debug/compare", compareS3vsCloudFront);
 
 module.exports = router;

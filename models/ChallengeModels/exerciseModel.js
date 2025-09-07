@@ -17,6 +17,10 @@ const exerciseSchema = mongoose.Schema(
       required: true,
       type: String,
     },
+    videoThumbnailURL: {
+      type: String,
+      required: false,
+    },
     trainer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

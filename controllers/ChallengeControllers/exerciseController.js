@@ -71,6 +71,7 @@ const createExercise = asyncHandler(async (req, res, next) => {
       user: req.user.id,
       title: req.body.title,
       videoURL: req.body.videoURL,
+      videoThumbnailURL: req.body.videoThumbnailURL,
       trainer: req.body.trainer,
       // break: req.body.break,
       // exerciseLength: req.body.exerciseLength,
