@@ -132,7 +132,7 @@ const deleteMediaFolder = asyncHandler(async (req, res, next) => {
   }
 
   await folder.remove();
-  await deleteFolderFromS3(req.params.id);
+  // await deleteFolderFromS3(req.params.id);
   res.status(200).json({ message: "Folder and associated media deleted" });
 });
 
@@ -498,7 +498,7 @@ const deleteMediaFile = asyncHandler(async (req, res, next) => {
   }
 
   // Delete the main file from S3
-  await deleteFile(folderId, file.filename);
+  // await deleteFile(folderId, file.filename);
 
   // Delete thumbnail if it exists
   if (file.thumbnailUrl && file.mediaType === "video") {
