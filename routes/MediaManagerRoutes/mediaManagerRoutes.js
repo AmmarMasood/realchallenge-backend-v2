@@ -21,6 +21,7 @@ const {
   moveMediaFile,
   debugCloudFrontPerformance,
   compareS3vsCloudFront,
+  searchMediaFiles, // New search function for admin
 } = require("../../controllers/MediaControllers/mediaController");
 const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
@@ -58,6 +59,10 @@ router.get("/folders", protect, admin, getAllMediaFolders);
 
 // Get current user's folders
 router.get("/folders/user", protect, getUserMediaFolders);
+
+// --- ADMIN SEARCH ROUTES ---
+// Search media files (admin only) - NEW ROUTE
+router.get("/search", protect, admin, searchMediaFiles);
 
 // --- FILE ROUTES ---
 router

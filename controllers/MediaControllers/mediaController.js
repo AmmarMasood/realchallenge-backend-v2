@@ -132,7 +132,7 @@ const deleteMediaFolder = asyncHandler(async (req, res, next) => {
   }
 
   await folder.remove();
-  // await deleteFolderFromS3(req.params.id);
+  await deleteFolderFromS3(req.params.id);
   res.status(200).json({ message: "Folder and associated media deleted" });
 });
 
@@ -498,7 +498,7 @@ const deleteMediaFile = asyncHandler(async (req, res, next) => {
   }
 
   // Delete the main file from S3
-  // await deleteFile(folderId, file.filename);
+  await deleteFile(folderId, file.filename);
 
   // Delete thumbnail if it exists
   if (file.thumbnailUrl && file.mediaType === "video") {
@@ -767,6 +767,108 @@ const compareS3vsCloudFront = asyncHandler(async (req, res, next) => {
   }
 });
 
+// @desc    Search media files by filename and user (admin only)
+// @route   GET /api/media/search
+// @access  private/admin
+const searchMediaFiles = asyncHandler(async (req, res, next) => {
+  const isAdmin = req.user && req.user.role === "admin";
+
+  // Check if user is admin
+  if (!isAdmin) {
+    return res.status(403).json({ message: "Admin access required" });
+  }
+
+  const { filename, userId, mediaType, page = 1, limit = 20 } = req.query;
+
+  // Build search query
+  const searchQuery = {};
+
+  // Search by filename (case-insensitive, partial match)
+  if (filename) {
+    searchQuery.$or = [
+      { originalName: { $regex: filename, $options: "i" } },
+      { filename: { $regex: filename, $options: "i" } }
+    ];
+  }
+
+  // Filter by user ID
+  if (userId) {
+    // Validate if userId is a valid ObjectId
+    if (!userId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid user ID format" });
+    }
+    searchQuery.user = userId;
+  }
+
+  // Filter by media type
+  if (mediaType && mediaType !== "all") {
+    searchQuery.mediaType = mediaType;
+  }
+
+  try {
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Execute search with population of user and folder data
+    const files = await MediaFiles.find(searchQuery)
+      .populate("user", "name email")
+      .populate("folderId", "name mediaType")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    // Get total count for pagination
+    const totalFiles = await MediaFiles.countDocuments(searchQuery);
+    const totalPages = Math.ceil(totalFiles / parseInt(limit));
+
+    // Build response
+    const searchResults = files.map(file => ({
+      _id: file._id,
+      filename: file.filename,
+      originalName: file.originalName,
+      filelink: file.filelink,
+      mediaType: file.mediaType,
+      size: file.size,
+      thumbnailUrl: file.thumbnailUrl,
+      createdAt: file.createdAt,
+      user: {
+        _id: file.user._id,
+        name: file.user.name,
+        email: file.user.email
+      },
+      folder: {
+        _id: file.folderId._id,
+        name: file.folderId.name,
+        mediaType: file.folderId.mediaType
+      }
+    }));
+
+    res.status(200).json({
+      files: searchResults,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages,
+        totalFiles,
+        filesPerPage: parseInt(limit),
+        hasNext: parseInt(page) < totalPages,
+        hasPrev: parseInt(page) > 1
+      },
+      searchCriteria: {
+        filename: filename || null,
+        userId: userId || null,
+        mediaType: mediaType || null
+      }
+    });
+
+  } catch (error) {
+    console.error("Search error:", error);
+    res.status(500).json({
+      message: "Search failed",
+      error: error.message
+    });
+  }
+});
+
 module.exports = {
   testMediaRoute,
   createMediaFolder,
@@ -784,4 +886,5 @@ module.exports = {
   moveMediaFile,
   compareS3vsCloudFront,
   debugCloudFrontPerformance,
+  searchMediaFiles, // New search function for admin
 };
