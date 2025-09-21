@@ -277,6 +277,8 @@ const getUserMediaFolders = asyncHandler(async (req, res, next) => {
     depth: 1,
     name: 1,
   });
+
+
   res.status(200).json({ folders });
 });
 
@@ -298,31 +300,11 @@ const getSpecificUserFolders = asyncHandler(async (req, res, next) => {
     return res.status(404).json({ message: "User not found" });
   }
 
-  // Get folders for the specific user
+  // Get folders for the specific user - return flat array like regular user endpoint
   const folders = await MediaFolder.find({ user: userId })
     .populate("user", "name email")
     .sort({ depth: 1, name: 1 });
 
-  // Organize folders in hierarchical structure
-  const folderMap = {};
-  const rootFolders = [];
-
-  // First pass: create folder map
-  folders.forEach((folder) => {
-    folderMap[folder._id] = {
-      ...folder.toObject(),
-      children: [],
-    };
-  });
-
-  // Second pass: organize hierarchy
-  folders.forEach((folder) => {
-    if (folder.parentId && folderMap[folder.parentId]) {
-      folderMap[folder.parentId].children.push(folderMap[folder._id]);
-    } else {
-      rootFolders.push(folderMap[folder._id]);
-    }
-  });
 
   res.status(200).json({
     user: {
@@ -330,7 +312,7 @@ const getSpecificUserFolders = asyncHandler(async (req, res, next) => {
       name: userExists.name,
       email: userExists.email,
     },
-    folders: rootFolders,
+    folders: folders, // Return exactly like getUserMediaFolders - keep mongoose documents
     totalFolders: folders.length,
   });
 });
