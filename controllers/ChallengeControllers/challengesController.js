@@ -345,6 +345,7 @@ const getAllUserChallenges = asyncHandler(async (req, res) => {
         "additionalProducts",
         "trainersFitnessInterest",
         "music",
+        "user",
         //"weeks.workouts",
         {
           path: "weeks",

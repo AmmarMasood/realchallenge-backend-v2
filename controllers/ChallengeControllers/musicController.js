@@ -87,7 +87,9 @@ const getMusicByChallenges = asyncHandler(async (req, res, next) => {
     const challenge = await Challenges.findById(challengeId).populate("music");
 
     if (!challenge.music) {
-      return res.status(400).json([]);
+      return res.status(200).json({
+        music: [],
+      });
     } else {
       return res.status(200).json({
         music: challenge.music,
