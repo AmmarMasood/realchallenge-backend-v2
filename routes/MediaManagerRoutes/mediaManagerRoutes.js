@@ -15,6 +15,7 @@ const {
   getSpecificUserFolders, // New admin function
   getUserMediaFolders,
   uploadMediaFile,
+  uploadMediaFileWithProgress,
   getMediaFolderFiles,
   deleteMediaFile,
   updateMediaFile,
@@ -22,7 +23,12 @@ const {
   debugCloudFrontPerformance,
   compareS3vsCloudFront,
   searchMediaFiles, // New search function for admin
+  searchMyMediaFiles, // New search function for regular users
 } = require("../../controllers/MediaControllers/mediaController");
+
+const {
+  establishProgressConnection,
+} = require("../../controllers/MediaControllers/progressController");
 const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
 
@@ -40,6 +46,10 @@ const uploadFile = multer({
 
 // Test route
 router.get("/", protect, testMediaRoute);
+
+// --- PROGRESS ROUTES ---
+// SSE endpoint for upload progress tracking (custom auth via query param)
+router.get("/progress/:uploadId", establishProgressConnection);
 
 // --- FOLDER ROUTES ---
 router.post("/folder", protect, createMediaFolder);
@@ -60,14 +70,22 @@ router.get("/folders", protect, admin, getAllMediaFolders);
 // Get current user's folders
 router.get("/folders/user", protect, getUserMediaFolders);
 
-// --- ADMIN SEARCH ROUTES ---
-// Search media files (admin only) - NEW ROUTE
+// --- SEARCH ROUTES ---
+// Search user's own media files and folders
+router.get("/search/my-files", protect, searchMyMediaFiles);
+
+// Search media files (admin only)
 router.get("/search", protect, admin, searchMediaFiles);
 
 // --- FILE ROUTES ---
 router
   .route("/folders/:folderId")
   .post(protect, uploadFile.single("file"), uploadMediaFile);
+
+// Upload with progress tracking
+router
+  .route("/folders/:folderId/with-progress")
+  .post(protect, uploadFile.single("file"), uploadMediaFileWithProgress);
 
 router.get("/folders/:folderId/files", protect, getMediaFolderFiles);
 router.delete("/folders/:folderId/files/:fileId", protect, deleteMediaFile);
