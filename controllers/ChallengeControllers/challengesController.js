@@ -352,131 +352,74 @@ const getAllChallenges = asyncHandler(async (req, res) => {
 
 const getAllUserChallenges = asyncHandler(async (req, res) => {
   let challenges;
+  const includeAssigned = req.query.includeAssigned === 'true';
+
+  // Common populate configuration
+  const populateConfig = [
+    "trainers",
+    "body",
+    "tags",
+    "additionalProducts",
+    "trainersFitnessInterest",
+    "music",
+    "user",
+    {
+      path: "weeks",
+      populate: [
+        {
+          path: "workouts",
+          populate: [
+            {
+              path: "exercises.exerciseId",
+            },
+            {
+              path: "relatedEquipments",
+            },
+            {
+              path: "relatedProducts",
+            },
+          ],
+        },
+      ],
+    },
+  ];
+
   if (req.user.role === "admin") {
     if (req.query.language && req.query.language.length > 0) {
       challenges = await Challenges.find({
         language: req.query.language,
-      }).populate([
-        "trainers",
-        "body",
-        "tags",
-        "additionalProducts",
-        "trainersFitnessInterest",
-        "music",
-        "user",
-        //"weeks.workouts",
-        {
-          path: "weeks",
-          populate: [
-            {
-              path: "workouts",
-              populate: [
-                {
-                  path: "exercises.exerciseId",
-                },
-                {
-                  path: "relatedEquipments",
-                },
-                {
-                  path: "relatedProducts",
-                },
-              ],
-            },
-          ],
-        },
-      ]);
+      }).populate(populateConfig);
     } else {
-      challenges = await Challenges.find({}).populate([
-        "trainers",
-        "body",
-        "tags",
-        "additionalProducts",
-        "trainersFitnessInterest",
-        "music",
-        //"weeks.workouts",
-        {
-          path: "weeks",
-          populate: [
-            {
-              path: "workouts",
-              populate: [
-                {
-                  path: "exercises.exerciseId",
-                },
-                {
-                  path: "relatedEquipments",
-                },
-                {
-                  path: "relatedProducts",
-                },
-              ],
-            },
-          ],
-        },
-      ]);
+      challenges = await Challenges.find({}).populate(populateConfig);
     }
   } else {
+    // For trainers: optionally include challenges where they are in trainers array
     if (req.query.language && req.query.language.length > 0) {
-      challenges = await Challenges.find({
-        user: req.user.id,
-        language: req.query.language,
-      }).populate([
-        "trainers",
-        "body",
-        "tags",
-        "additionalProducts",
-        "trainersFitnessInterest",
-        "music",
-        //"weeks.workouts",
-        {
-          path: "weeks",
-          populate: [
-            {
-              path: "workouts",
-              populate: [
-                {
-                  path: "exercises.exerciseId",
-                },
-                {
-                  path: "relatedEquipments",
-                },
-                {
-                  path: "relatedProducts",
-                },
-              ],
-            },
-          ],
-        },
-      ]);
+      const query = includeAssigned
+        ? {
+            $or: [
+              { user: req.user.id },
+              { trainers: req.user.id }
+            ],
+            language: req.query.language,
+          }
+        : {
+            user: req.user.id,
+            language: req.query.language,
+          };
+
+      challenges = await Challenges.find(query).populate(populateConfig);
     } else {
-      challenges = await Challenges.find({ user: req.user.id }).populate([
-        "trainers",
-        "body",
-        "tags",
-        "additionalProducts",
-        "trainersFitnessInterest",
-        "music",
-        //"weeks.workouts",
-        {
-          path: "weeks",
-          populate: [
-            {
-              path: "workouts",
-              populate: [
-                {
-                  path: "exercises.exerciseId",
-                },
-                {
-                  path: "relatedEquipments",
-                },
-                {
-                  path: "relatedProducts",
-                },
-              ],
-            },
-          ],
-        },
-      ]);
+      const query = includeAssigned
+        ? {
+            $or: [
+              { user: req.user.id },
+              { trainers: req.user.id }
+            ]
+          }
+        : { user: req.user.id };
+
+      challenges = await Challenges.find(query).populate(populateConfig);
     }
   }
 

@@ -180,22 +180,45 @@ const getAllExercises = asyncHandler(async (req, res) => {
 
 const getAllUserExercises = asyncHandler(async (req, res) => {
   let exercises;
+  const includeAssigned = req.query.includeAssigned === 'true';
+
   if (req.query.language && req.query.language.length > 0) {
     if (req.user.role === "admin") {
       exercises = await Exercise.find({
         language: req.query.language,
       }).populate(["user", "trainer"]);
     } else {
-      exercises = await Exercise.find({
-        user: req.user.id,
-        language: req.query.language,
-      }).populate(["user", "trainer"]);
+      // For trainers: optionally include exercises where they are assigned trainer
+      const query = includeAssigned
+        ? {
+            $or: [
+              { user: req.user.id },
+              { trainer: req.user.id }
+            ],
+            language: req.query.language,
+          }
+        : {
+            user: req.user.id,
+            language: req.query.language,
+          };
+
+      exercises = await Exercise.find(query).populate(["user", "trainer"]);
     }
   } else {
     if (req.user.role === "admin") {
       exercises = await Exercise.find({}).populate(["user", "trainer"]);
     } else {
-      exercises = await Exercise.find({ user: req.user.id }).populate([
+      // For trainers: optionally include exercises where they are assigned trainer
+      const query = includeAssigned
+        ? {
+            $or: [
+              { user: req.user.id },
+              { trainer: req.user.id }
+            ]
+          }
+        : { user: req.user.id };
+
+      exercises = await Exercise.find(query).populate([
         "user",
         "trainer",
       ]);
