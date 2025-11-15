@@ -21,6 +21,11 @@ const {
   createNotification,
 } = require("../NotificationControllers/notificationController");
 
+// Helper function to escape regex special characters
+const escapeRegex = (string) => {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
 // @desc    Create a Challenge
 // @route   POST /api/challenges/create
 const createChallenge = asyncHandler(async (req, res, next) => {
@@ -33,6 +38,19 @@ const createChallenge = asyncHandler(async (req, res, next) => {
     if (!errors.isEmpty()) {
       res.status(422).json({ errors: errors.array() });
       return;
+    }
+
+    // Check if challenge with same name already exists for this user (case-insensitive)
+    const existingChallenge = await Challenges.findOne({
+      user: req.user.id,
+      challengeName: { $regex: new RegExp(`^${escapeRegex(req.body.challengeName)}$`, 'i') },
+    });
+
+    if (existingChallenge) {
+      return res.status(409).json({
+        message: "A challenge with this name already exists",
+        error: "DUPLICATE_CHALLENGE_NAME",
+      });
     }
 
     let WeeksResolved;
@@ -476,6 +494,24 @@ const getAllUserChallenges = asyncHandler(async (req, res) => {
 // // @route   PUT /api/challenge/:challengeId
 const updateChallenge = asyncHandler(async (req, res, next) => {
   try {
+    // If challengeName is being updated, check for duplicates
+    if (req.body.challengeName) {
+      const challenge = await Challenges.findById(req.params.challengeId);
+
+      const existingChallenge = await Challenges.findOne({
+        user: challenge.user,
+        challengeName: { $regex: new RegExp(`^${escapeRegex(req.body.challengeName)}$`, 'i') },
+        _id: { $ne: req.params.challengeId }, // Exclude the current challenge
+      });
+
+      if (existingChallenge) {
+        return res.status(409).json({
+          message: "A challenge with this name already exists",
+          error: "DUPLICATE_CHALLENGE_NAME",
+        });
+      }
+    }
+
     let musicsResolved;
     if (req.body.music) {
       if (req.body.music.length > 0) {

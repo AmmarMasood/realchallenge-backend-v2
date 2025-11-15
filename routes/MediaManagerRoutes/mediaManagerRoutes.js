@@ -32,6 +32,9 @@ const {
 const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
 
+// Maximum file size: 150MB
+const MAX_FILE_SIZE = 150 * 1024 * 1024; // 150MB
+
 // image upload folder
 const uploadFile = multer({
   storage: multer.diskStorage({
@@ -42,6 +45,13 @@ const uploadFile = multer({
       cb(null, uuidv4() + "_" + file.originalname);
     },
   }),
+  limits: {
+    fileSize: MAX_FILE_SIZE, // Limit file size to 100MB
+  },
+  fileFilter: function (req, file, cb) {
+    // This will be called before the file is saved
+    cb(null, true);
+  },
 });
 
 // Test route
@@ -77,15 +87,33 @@ router.get("/search/my-files", protect, searchMyMediaFiles);
 // Search media files (admin only)
 router.get("/search", protect, admin, searchMediaFiles);
 
+// Multer error handling middleware
+const handleMulterError = (err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({
+        message: `File size exceeds the maximum limit of ${Math.round(MAX_FILE_SIZE / (1024 * 1024))}MB`,
+        error: err.message,
+        maxSize: MAX_FILE_SIZE,
+      });
+    }
+    return res.status(400).json({
+      message: "File upload error",
+      error: err.message,
+    });
+  }
+  next(err);
+};
+
 // --- FILE ROUTES ---
 router
   .route("/folders/:folderId")
-  .post(protect, uploadFile.single("file"), uploadMediaFile);
+  .post(protect, uploadFile.single("file"), handleMulterError, uploadMediaFile);
 
 // Upload with progress tracking
 router
   .route("/folders/:folderId/with-progress")
-  .post(protect, uploadFile.single("file"), uploadMediaFileWithProgress);
+  .post(protect, uploadFile.single("file"), handleMulterError, uploadMediaFileWithProgress);
 
 router.get("/folders/:folderId/files", protect, getMediaFolderFiles);
 router.delete("/folders/:folderId/files/:fileId", protect, deleteMediaFile);

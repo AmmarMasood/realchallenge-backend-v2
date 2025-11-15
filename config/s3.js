@@ -77,11 +77,16 @@ function uploadFile(file, folderId) {
     uploadParams.CacheControl = "public, max-age=86400";
   }
 
-  // Use multipart upload for files > 100MB
+  // Use multipart upload for files > 20MB
+  // Maximum file size is 150MB, so we optimize for that range
   const partSize =
     fileSize > 100 * 1024 * 1024
-      ? 10 * 1024 * 1024 // 10MB parts for large files
-      : 5 * 1024 * 1024; // 5MB parts for smaller files
+      ? 15 * 1024 * 1024 // 15MB parts for files 100-150MB
+      : fileSize > 50 * 1024 * 1024
+      ? 10 * 1024 * 1024 // 10MB parts for files 50-100MB
+      : fileSize > 20 * 1024 * 1024
+      ? 5 * 1024 * 1024 // 5MB parts for files 20-50MB
+      : undefined; // Let S3 decide for files < 20MB (single upload)
 
   return s3
     .upload(uploadParams, {

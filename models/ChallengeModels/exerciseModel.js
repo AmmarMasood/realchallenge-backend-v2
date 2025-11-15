@@ -42,4 +42,7 @@ const exerciseSchema = mongoose.Schema(
   { timestamps: true }
 );
 
+// Compound unique index to prevent duplicate exercise titles per trainer
+exerciseSchema.index({ trainer: 1, title: 1 }, { unique: true });
+
 exports.Exercise = mongoose.model("Exercise", exerciseSchema);

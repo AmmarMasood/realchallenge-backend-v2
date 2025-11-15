@@ -20,6 +20,9 @@ const MediaFiles = require("../../models/MediaManagerModels/mediaFileModel");
 const MediaFolder = require("../../models/MediaManagerModels/mediaFolderModel");
 const { User } = require("../../models/UserModels/userModel"); // Assuming you have a User model
 
+// Maximum file size: 150MB in bytes
+const MAX_FILE_SIZE = 150 * 1024 * 1024; // 150MB
+
 const unLinkFile = async (filename) => {
   const filePath = path.join(__dirname, "../../uploads/", filename);
   try {
@@ -338,6 +341,16 @@ const uploadMediaFile = asyncHandler(async (req, res, next) => {
     return res.status(400).json({ message: "No file uploaded" });
   }
 
+  // Check file size
+  if (file.size > MAX_FILE_SIZE) {
+    await unLinkFile(file.filename);
+    return res.status(400).json({
+      message: `File size exceeds the maximum limit of ${Math.round(MAX_FILE_SIZE / (1024 * 1024))}MB`,
+      fileSize: file.size,
+      maxSize: MAX_FILE_SIZE,
+    });
+  }
+
   const folder = await MediaFolder.findById(folderId);
   if (!folder) {
     return res.status(404).json({ message: "Folder not found" });
@@ -466,6 +479,18 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
   if (!file) {
     sendUploadError(user._id, uploadId, new Error("No file uploaded"));
     return res.status(400).json({ message: "No file uploaded" });
+  }
+
+  // Check file size
+  if (file.size > MAX_FILE_SIZE) {
+    await unLinkFile(file.filename);
+    const error = new Error(`File size exceeds the maximum limit of ${Math.round(MAX_FILE_SIZE / (1024 * 1024))}MB`);
+    sendUploadError(user._id, uploadId, error);
+    return res.status(400).json({
+      message: error.message,
+      fileSize: file.size,
+      maxSize: MAX_FILE_SIZE,
+    });
   }
 
   try {

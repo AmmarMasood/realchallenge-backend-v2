@@ -5,6 +5,11 @@ const { Workout } = require("../../models/ChallengeModels/workoutModel");
 const { Exercise } = require("../../models/ChallengeModels/exerciseModel");
 // const { Chal } = require("../models/equipmentModel");
 
+// Helper function to escape regex special characters
+const escapeRegex = (string) => {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
 // const createExercise = asyncHandler(async (exercise, isRendered) => {
 //   try {
 //     let newExercise;
@@ -67,6 +72,20 @@ const createExercise = asyncHandler(async (req, res, next) => {
       return;
     }
     console.log(req.body);
+
+    // Check if exercise with same title already exists for this trainer (case-insensitive)
+    const existingExercise = await Exercise.findOne({
+      trainer: req.body.trainer,
+      title: { $regex: new RegExp(`^${escapeRegex(req.body.title)}$`, 'i') },
+    });
+
+    if (existingExercise) {
+      return res.status(409).json({
+        message: "An exercise with this name already exists for this trainer",
+        error: "DUPLICATE_EXERCISE_NAME",
+      });
+    }
+
     let newExercise = new Exercise({
       user: req.user.id,
       title: req.body.title,
@@ -101,6 +120,27 @@ const updateExercise = asyncHandler(async (req, res, next) => {
   try {
     const update = req.body;
     const exerciseId = req.params.exerciseId;
+
+    // If title is being updated, check for duplicates
+    if (update.title) {
+      // Get the current exercise to know which trainer it belongs to
+      const currentExercise = await Exercise.findById(exerciseId);
+      const trainerId = update.trainer || currentExercise.trainer;
+
+      const existingExercise = await Exercise.findOne({
+        trainer: trainerId,
+        title: { $regex: new RegExp(`^${escapeRegex(update.title)}$`, 'i') },
+        _id: { $ne: exerciseId }, // Exclude the current exercise
+      });
+
+      if (existingExercise) {
+        return res.status(409).json({
+          message: "An exercise with this name already exists for this trainer",
+          error: "DUPLICATE_EXERCISE_NAME",
+        });
+      }
+    }
+
     const exercise = await Exercise.findByIdAndUpdate(exerciseId, update, {
       useFindAndModify: false,
       new: true,
