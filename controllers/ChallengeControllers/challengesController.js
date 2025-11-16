@@ -40,15 +40,21 @@ const createChallenge = asyncHandler(async (req, res, next) => {
       return;
     }
 
-    // Check if challenge with same name already exists for this user (case-insensitive)
+    // Check if challenge with same name already exists for the assigned trainers and language (case-insensitive)
+    // It follows the trainer (the owner), not the creator when it's the admin
+    const trainersToCheck = req.body.trainers && req.body.trainers.length > 0
+      ? req.body.trainers
+      : [req.user.id]; // If no trainers assigned, use creator as owner
+
     const existingChallenge = await Challenges.findOne({
-      user: req.user.id,
+      trainers: { $in: trainersToCheck },
+      language: req.body.language,
       challengeName: { $regex: new RegExp(`^${escapeRegex(req.body.challengeName)}$`, 'i') },
     });
 
     if (existingChallenge) {
       return res.status(409).json({
-        message: "A challenge with this name already exists",
+        message: "A challenge with this name and language already exists for one of the assigned trainers",
         error: "DUPLICATE_CHALLENGE_NAME",
       });
     }
@@ -437,19 +443,27 @@ const getAllUserChallenges = asyncHandler(async (req, res) => {
 // // @route   PUT /api/challenge/:challengeId
 const updateChallenge = asyncHandler(async (req, res, next) => {
   try {
-    // If challengeName is being updated, check for duplicates
-    if (req.body.challengeName) {
+    // If challengeName, trainers, or language is being updated, check for duplicates
+    if (req.body.challengeName || req.body.trainers || req.body.language) {
       const challenge = await Challenges.findById(req.params.challengeId);
 
+      // Use updated values or fall back to existing values
+      const trainersToCheck = req.body.trainers !== undefined
+        ? (req.body.trainers.length > 0 ? req.body.trainers : [challenge.user])
+        : (challenge.trainers.length > 0 ? challenge.trainers : [challenge.user]);
+      const languageToCheck = req.body.language || challenge.language;
+      const nameToCheck = req.body.challengeName || challenge.challengeName;
+
       const existingChallenge = await Challenges.findOne({
-        user: challenge.user,
-        challengeName: { $regex: new RegExp(`^${escapeRegex(req.body.challengeName)}$`, 'i') },
+        trainers: { $in: trainersToCheck },
+        language: languageToCheck,
+        challengeName: { $regex: new RegExp(`^${escapeRegex(nameToCheck)}$`, 'i') },
         _id: { $ne: req.params.challengeId }, // Exclude the current challenge
       });
 
       if (existingChallenge) {
         return res.status(409).json({
-          message: "A challenge with this name already exists",
+          message: "A challenge with this name and language already exists for one of the assigned trainers",
           error: "DUPLICATE_CHALLENGE_NAME",
         });
       }

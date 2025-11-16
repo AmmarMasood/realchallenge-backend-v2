@@ -73,9 +73,10 @@ const createExercise = asyncHandler(async (req, res, next) => {
     }
     console.log(req.body);
 
-    // Check if exercise with same title already exists for this trainer (case-insensitive)
+    // Check if exercise with same title already exists for this trainer and language (case-insensitive)
     const existingExercise = await Exercise.findOne({
       trainer: req.body.trainer,
+      language: req.body.language,
       title: { $regex: new RegExp(`^${escapeRegex(req.body.title)}$`, 'i') },
     });
 
@@ -121,15 +122,18 @@ const updateExercise = asyncHandler(async (req, res, next) => {
     const update = req.body;
     const exerciseId = req.params.exerciseId;
 
-    // If title is being updated, check for duplicates
-    if (update.title) {
-      // Get the current exercise to know which trainer it belongs to
+    // If title or language is being updated, check for duplicates
+    if (update.title || update.language) {
+      // Get the current exercise to know which trainer and language it belongs to
       const currentExercise = await Exercise.findById(exerciseId);
       const trainerId = update.trainer || currentExercise.trainer;
+      const language = update.language || currentExercise.language;
+      const title = update.title || currentExercise.title;
 
       const existingExercise = await Exercise.findOne({
         trainer: trainerId,
-        title: { $regex: new RegExp(`^${escapeRegex(update.title)}$`, 'i') },
+        language: language,
+        title: { $regex: new RegExp(`^${escapeRegex(title)}$`, 'i') },
         _id: { $ne: exerciseId }, // Exclude the current exercise
       });
 
