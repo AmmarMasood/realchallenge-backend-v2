@@ -21,7 +21,7 @@ const MediaFolder = require("../../models/MediaManagerModels/mediaFolderModel");
 const { User } = require("../../models/UserModels/userModel"); // Assuming you have a User model
 
 // Maximum file size: 150MB in bytes
-const MAX_FILE_SIZE = 150 * 1024 * 1024; // 150MB
+const MAX_FILE_SIZE = 400 * 1024 * 1024; // 400MB
 
 const unLinkFile = async (filename) => {
   const filePath = path.join(__dirname, "../../uploads/", filename);
@@ -286,7 +286,6 @@ const getUserMediaFolders = asyncHandler(async (req, res, next) => {
     name: 1,
   });
 
-
   res.status(200).json({ folders });
 });
 
@@ -312,7 +311,6 @@ const getSpecificUserFolders = asyncHandler(async (req, res, next) => {
   const folders = await MediaFolder.find({ user: userId })
     .populate("user", "name email")
     .sort({ depth: 1, name: 1 });
-
 
   res.status(200).json({
     user: {
@@ -345,7 +343,9 @@ const uploadMediaFile = asyncHandler(async (req, res, next) => {
   if (file.size > MAX_FILE_SIZE) {
     await unLinkFile(file.filename);
     return res.status(400).json({
-      message: `File size exceeds the maximum limit of ${Math.round(MAX_FILE_SIZE / (1024 * 1024))}MB`,
+      message: `File size exceeds the maximum limit of ${Math.round(
+        MAX_FILE_SIZE / (1024 * 1024)
+      )}MB`,
       fileSize: file.size,
       maxSize: MAX_FILE_SIZE,
     });
@@ -377,34 +377,39 @@ const uploadMediaFile = asyncHandler(async (req, res, next) => {
   let finalFile = file;
   let uploadResult;
 
-  // Optimize video files before upload
-  if (VideoOptimizationService.isVideoFile(file.mimetype)) {
-    try {
-      console.log("Optimizing video for streaming:", file.originalname);
-      const optimizedResult =
-        await VideoOptimizationService.processVideoForStreaming(
-          file,
-          path.dirname(file.path)
-        );
+  // VIDEO OPTIMIZATION DISABLED - To prevent EC2 instance crashes on t3.micro
+  // If you upgrade to t3.small or higher, you can re-enable this
+  // if (VideoOptimizationService.isVideoFile(file.mimetype)) {
+  //   try {
+  //     console.log("Optimizing video for streaming:", file.originalname);
+  //     const optimizedResult =
+  //       await VideoOptimizationService.processVideoForStreaming(
+  //         file,
+  //         path.dirname(file.path)
+  //       );
+  //
+  //     // Create a new file object for the optimized video
+  //     finalFile = {
+  //       ...file,
+  //       path: optimizedResult.optimizedPath,
+  //       filename: optimizedResult.optimizedFilename,
+  //       size: fs.statSync(optimizedResult.optimizedPath).size,
+  //     };
+  //
+  //     console.log("Video optimization completed");
+  //   } catch (optimizationError) {
+  //     console.error(
+  //       "Video optimization failed, using original:",
+  //       optimizationError
+  //     );
+  //     // Continue with original file if optimization fails
+  //   }
+  // }
 
-      // Create a new file object for the optimized video
-      finalFile = {
-        ...file,
-        path: optimizedResult.optimizedPath,
-        filename: optimizedResult.optimizedFilename,
-        size: fs.statSync(optimizedResult.optimizedPath).size,
-      };
-
-      console.log("Video optimization completed");
-    } catch (optimizationError) {
-      console.error(
-        "Video optimization failed, using original:",
-        optimizationError
-      );
-      // Continue with original file if optimization fails
-    }
-  }
-
+  console.log(
+    "Uploading original file (optimization disabled):",
+    file.originalname
+  );
   uploadResult = await uploadFile(finalFile, folderId);
 
   // Convert S3 URL to CloudFront URL for better performance
@@ -465,7 +470,7 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
   const folderId = req.params.folderId;
   const user = req.user;
   const file = req.file;
-  const uploadId = req.body.uploadId || req.headers['x-upload-id'];
+  const uploadId = req.body.uploadId || req.headers["x-upload-id"];
 
   const isAdmin = req.user && req.user.role === "admin";
 
@@ -473,7 +478,9 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
   console.log("Upload ID:", uploadId);
 
   if (!uploadId) {
-    return res.status(400).json({ message: "Upload ID is required for progress tracking" });
+    return res
+      .status(400)
+      .json({ message: "Upload ID is required for progress tracking" });
   }
 
   if (!file) {
@@ -484,7 +491,11 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
   // Check file size
   if (file.size > MAX_FILE_SIZE) {
     await unLinkFile(file.filename);
-    const error = new Error(`File size exceeds the maximum limit of ${Math.round(MAX_FILE_SIZE / (1024 * 1024))}MB`);
+    const error = new Error(
+      `File size exceeds the maximum limit of ${Math.round(
+        MAX_FILE_SIZE / (1024 * 1024)
+      )}MB`
+    );
     sendUploadError(user._id, uploadId, error);
     return res.status(400).json({
       message: error.message,
@@ -498,7 +509,7 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
     sendProgressUpdate(user._id, uploadId, {
       stage: "validating",
       progress: 5,
-      message: "Validating folder..."
+      message: "Validating folder...",
     });
 
     const folder = await MediaFolder.findById(folderId);
@@ -517,7 +528,7 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
     sendProgressUpdate(user._id, uploadId, {
       stage: "checking_duplicates",
       progress: 10,
-      message: "Checking for duplicate files..."
+      message: "Checking for duplicate files...",
     });
 
     const existingFile = await MediaFiles.findOne({
@@ -527,64 +538,84 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
 
     if (existingFile) {
       await unLinkFile(file.filename);
-      sendUploadError(user._id, uploadId, new Error("A file with this name already exists in this folder"));
-      return res.status(400).json({ message: "A file with this name already exists in this folder" });
+      sendUploadError(
+        user._id,
+        uploadId,
+        new Error("A file with this name already exists in this folder")
+      );
+      return res
+        .status(400)
+        .json({
+          message: "A file with this name already exists in this folder",
+        });
     }
 
     let finalFile = file;
     let uploadResult;
 
-    // Step 3: Video optimization if needed (15% - 50%)
-    if (VideoOptimizationService.isVideoFile(file.mimetype)) {
-      sendProgressUpdate(user._id, uploadId, {
-        stage: "optimizing_video",
-        progress: 15,
-        message: "Optimizing video for streaming..."
-      });
+    // Step 3: Video optimization DISABLED - To prevent EC2 instance crashes on t3.micro
+    // If you upgrade to t3.small or higher, you can re-enable this
+    // if (VideoOptimizationService.isVideoFile(file.mimetype)) {
+    //   sendProgressUpdate(user._id, uploadId, {
+    //     stage: "optimizing_video",
+    //     progress: 15,
+    //     message: "Optimizing video for streaming..."
+    //   });
+    //
+    //   try {
+    //     console.log("Optimizing video for streaming:", file.originalname);
+    //     const optimizedResult = await VideoOptimizationService.processVideoForStreaming(
+    //       file,
+    //       path.dirname(file.path)
+    //     );
+    //
+    //     sendProgressUpdate(user._id, uploadId, {
+    //       stage: "optimizing_video",
+    //       progress: 45,
+    //       message: "Video optimization completed"
+    //     });
+    //
+    //     // Create a new file object for the optimized video
+    //     finalFile = {
+    //       ...file,
+    //       path: optimizedResult.optimizedPath,
+    //       filename: optimizedResult.optimizedFilename,
+    //       size: fs.statSync(optimizedResult.optimizedPath).size,
+    //     };
+    //
+    //     console.log("Video optimization completed");
+    //   } catch (optimizationError) {
+    //     console.error("Video optimization failed, using original:", optimizationError);
+    //     sendProgressUpdate(user._id, uploadId, {
+    //       stage: "optimizing_video",
+    //       progress: 45,
+    //       message: "Video optimization failed, using original file"
+    //     });
+    //   }
+    // } else {
+    //   sendProgressUpdate(user._id, uploadId, {
+    //     stage: "processing",
+    //     progress: 45,
+    //     message: "Processing file..."
+    //   });
+    // }
 
-      try {
-        console.log("Optimizing video for streaming:", file.originalname);
-        const optimizedResult = await VideoOptimizationService.processVideoForStreaming(
-          file,
-          path.dirname(file.path)
-        );
-
-        sendProgressUpdate(user._id, uploadId, {
-          stage: "optimizing_video",
-          progress: 45,
-          message: "Video optimization completed"
-        });
-
-        // Create a new file object for the optimized video
-        finalFile = {
-          ...file,
-          path: optimizedResult.optimizedPath,
-          filename: optimizedResult.optimizedFilename,
-          size: fs.statSync(optimizedResult.optimizedPath).size,
-        };
-
-        console.log("Video optimization completed");
-      } catch (optimizationError) {
-        console.error("Video optimization failed, using original:", optimizationError);
-        sendProgressUpdate(user._id, uploadId, {
-          stage: "optimizing_video",
-          progress: 45,
-          message: "Video optimization failed, using original file"
-        });
-      }
-    } else {
-      sendProgressUpdate(user._id, uploadId, {
-        stage: "processing",
-        progress: 45,
-        message: "Processing file..."
-      });
-    }
+    // Skip optimization, proceed directly to upload
+    console.log(
+      "Uploading original file (optimization disabled):",
+      file.originalname
+    );
+    sendProgressUpdate(user._id, uploadId, {
+      stage: "processing",
+      progress: 45,
+      message: "Processing file (optimization disabled)...",
+    });
 
     // Step 4: Upload to S3 (50% - 70%)
     sendProgressUpdate(user._id, uploadId, {
       stage: "uploading_to_s3",
       progress: 50,
-      message: "Uploading to cloud storage..."
+      message: "Uploading to cloud storage...",
     });
 
     uploadResult = await uploadFile(finalFile, folderId);
@@ -592,7 +623,7 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
     sendProgressUpdate(user._id, uploadId, {
       stage: "uploading_to_s3",
       progress: 70,
-      message: "Cloud upload completed"
+      message: "Cloud upload completed",
     });
 
     // Convert S3 URL to CloudFront URL for better performance
@@ -607,7 +638,7 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
       sendProgressUpdate(user._id, uploadId, {
         stage: "generating_thumbnail",
         progress: 75,
-        message: "Generating video thumbnail..."
+        message: "Generating video thumbnail...",
       });
 
       try {
@@ -619,7 +650,9 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
 
         // Convert thumbnail S3 URL to CloudFront URL if possible
         if (thumbnailS3Url) {
-          const thumbnailFilename = ThumbnailService.getThumbnailFilename(file.filename);
+          const thumbnailFilename = ThumbnailService.getThumbnailFilename(
+            file.filename
+          );
           const thumbnailS3Key = `${folderId}/${thumbnailFilename}`;
           thumbnailUrl = getCloudFrontUrl(thumbnailS3Key);
         }
@@ -627,7 +660,7 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
         sendProgressUpdate(user._id, uploadId, {
           stage: "generating_thumbnail",
           progress: 85,
-          message: "Thumbnail generated successfully"
+          message: "Thumbnail generated successfully",
         });
 
         console.log("Thumbnail generated successfully:", thumbnailUrl);
@@ -636,14 +669,14 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
         sendProgressUpdate(user._id, uploadId, {
           stage: "generating_thumbnail",
           progress: 85,
-          message: "Thumbnail generation failed, continuing..."
+          message: "Thumbnail generation failed, continuing...",
         });
       }
     } else {
       sendProgressUpdate(user._id, uploadId, {
         stage: "processing",
         progress: 85,
-        message: "Processing completed"
+        message: "Processing completed",
       });
     }
 
@@ -651,7 +684,7 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
     sendProgressUpdate(user._id, uploadId, {
       stage: "saving_to_database",
       progress: 90,
-      message: "Saving file information..."
+      message: "Saving file information...",
     });
 
     // Clean up temporary files
@@ -675,17 +708,16 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
     sendProgressUpdate(user._id, uploadId, {
       stage: "completed",
       progress: 100,
-      message: "Upload completed successfully!"
+      message: "Upload completed successfully!",
     });
 
     // Send completion signal
     sendUploadComplete(user._id, uploadId, {
       mediaFile,
-      message: "File uploaded successfully"
+      message: "File uploaded successfully",
     });
 
     res.status(201).json({ mediaFile, message: "File uploaded successfully" });
-
   } catch (error) {
     console.error("Upload error:", error);
     sendUploadError(user._id, uploadId, error);
@@ -1022,7 +1054,7 @@ const searchMediaFiles = asyncHandler(async (req, res, next) => {
   if (filename) {
     fileSearchQuery.$or = [
       { originalName: { $regex: filename, $options: "i" } },
-      { filename: { $regex: filename, $options: "i" } }
+      { filename: { $regex: filename, $options: "i" } },
     ];
   }
 
@@ -1072,7 +1104,7 @@ const searchMediaFiles = asyncHandler(async (req, res, next) => {
         .limit(parseInt(limit)),
       MediaFolder.find(folderSearchQuery)
         .populate("user", "name email")
-        .sort({ depth: 1, name: 1 })
+        .sort({ depth: 1, name: 1 }),
     ]);
 
     // Get total count for pagination
@@ -1116,13 +1148,13 @@ const searchMediaFiles = asyncHandler(async (req, res, next) => {
           user: {
             _id: file.user._id,
             name: file.user.name,
-            email: file.user.email
+            email: file.user.email,
           },
           folder: {
             _id: file.folderId._id,
             name: file.folderId.name,
-            mediaType: file.folderId.mediaType
-          }
+            mediaType: file.folderId.mediaType,
+          },
         };
       })
     );
@@ -1143,8 +1175,8 @@ const searchMediaFiles = asyncHandler(async (req, res, next) => {
           user: {
             _id: folder.user._id,
             name: folder.user.name,
-            email: folder.user.email
-          }
+            email: folder.user.email,
+          },
         };
       })
     );
@@ -1158,20 +1190,19 @@ const searchMediaFiles = asyncHandler(async (req, res, next) => {
         totalFiles,
         filesPerPage: parseInt(limit),
         hasNext: parseInt(page) < totalPages,
-        hasPrev: parseInt(page) > 1
+        hasPrev: parseInt(page) > 1,
       },
       searchCriteria: {
         filename: filename || null,
         userId: userId || null,
-        mediaType: mediaType || null
-      }
+        mediaType: mediaType || null,
+      },
     });
-
   } catch (error) {
     console.error("Search error:", error);
     res.status(500).json({
       message: "Search failed",
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -1191,7 +1222,7 @@ const searchMyMediaFiles = asyncHandler(async (req, res, next) => {
     if (filename) {
       fileSearchQuery.$or = [
         { originalName: { $regex: filename, $options: "i" } },
-        { filename: { $regex: filename, $options: "i" } }
+        { filename: { $regex: filename, $options: "i" } },
       ];
     }
 
@@ -1218,8 +1249,7 @@ const searchMyMediaFiles = asyncHandler(async (req, res, next) => {
       MediaFiles.find(fileSearchQuery)
         .populate("folderId", "name mediaType")
         .sort({ createdAt: -1 }),
-      MediaFolder.find(folderSearchQuery)
-        .sort({ depth: 1, name: 1 })
+      MediaFolder.find(folderSearchQuery).sort({ depth: 1, name: 1 }),
     ]);
 
     // Helper function to build folder path
@@ -1285,15 +1315,14 @@ const searchMyMediaFiles = asyncHandler(async (req, res, next) => {
       totalFiles: filesWithPaths.length,
       searchCriteria: {
         filename: filename || null,
-        mediaType: mediaType || null
-      }
+        mediaType: mediaType || null,
+      },
     });
-
   } catch (error) {
     console.error("Search error:", error);
     res.status(500).json({
       message: "Search failed",
-      error: error.message
+      error: error.message,
     });
   }
 });
