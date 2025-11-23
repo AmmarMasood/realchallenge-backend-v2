@@ -201,7 +201,8 @@ const getAllMediaFoldersGroupedByUser = asyncHandler(async (req, res, next) => {
     {
       $project: {
         _id: 1,
-        name: 1,
+        firstName: 1,
+        lastName: 1,
         email: 1,
         folders: {
           $map: {
@@ -247,7 +248,8 @@ const getAllMediaFoldersGroupedByUser = asyncHandler(async (req, res, next) => {
     return {
       user: {
         _id: user._id,
-        name: user.name,
+        firstName: user.firstName,
+        lastName: user.lastName,
         email: user.email,
       },
       folders: rootFolders,
