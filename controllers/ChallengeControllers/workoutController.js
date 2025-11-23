@@ -138,32 +138,57 @@ const updateWorkout = asyncHandler(async (req, res, next) => {
       //   }
       // }
       const oldWorkout = await Workout.findById(req.body._id);
+      // Use hasOwnProperty checks so empty strings/nulls can CLEAR values
       let update = {
-        title: req.body.title ? req.body.title : oldWorkout.title,
-        subtitle: req.body.subtitle ? req.body.subtitle : oldWorkout.subtitle,
-        infoTitle: req.body.infotitle
+        title: Object.prototype.hasOwnProperty.call(req.body, "title")
+          ? req.body.title
+          : oldWorkout.title,
+        subtitle: Object.prototype.hasOwnProperty.call(req.body, "subtitle")
+          ? req.body.subtitle
+          : oldWorkout.subtitle,
+        infoTitle: Object.prototype.hasOwnProperty.call(req.body, "infotitle")
           ? req.body.infotitle
           : oldWorkout.infotitle,
-        infoFile: req.body.infoFile ? req.body.infoFile : oldWorkout.infoFile,
-        relatedEquipments: req.body.equipment
+        infoFile: Object.prototype.hasOwnProperty.call(req.body, "infoFile")
+          ? req.body.infoFile
+          : oldWorkout.infoFile,
+        relatedEquipments: Object.prototype.hasOwnProperty.call(
+          req.body,
+          "equipment"
+        )
           ? req.body.equipment
           : oldWorkout.relatedEquipments,
-        relatedProducts: req.body.relatedProducts
+        relatedProducts: Object.prototype.hasOwnProperty.call(
+          req.body,
+          "relatedProducts"
+        )
           ? req.body.relatedProducts
           : oldWorkout.relatedProducts,
-        introVideoLink: req.body.introVideoLink
+        introVideoLink: Object.prototype.hasOwnProperty.call(
+          req.body,
+          "introVideoLink"
+        )
           ? req.body.introVideoLink
           : oldWorkout.introVideoLink,
-        introVideoThumbnailLink: req.body.introVideoThumbnailLink
+        introVideoThumbnailLink: Object.prototype.hasOwnProperty.call(
+          req.body,
+          "introVideoThumbnailLink"
+        )
           ? req.body.introVideoThumbnailLink
           : oldWorkout.introVideoThumbnailLink,
-        introVideoLength: req.body.introVideoLength
+        introVideoLength: Object.prototype.hasOwnProperty.call(
+          req.body,
+          "introVideoLength"
+        )
           ? req.body.introVideoLength
           : oldWorkout.introVideoLength,
-        relatedEquipments: req.body.relatedEquipments
+        relatedEquipments: Object.prototype.hasOwnProperty.call(
+          req.body,
+          "relatedEquipments"
+        )
           ? req.body.relatedEquipments
           : oldWorkout.relatedEquipments,
-        isRendered: req.body.isRendered
+        isRendered: Object.prototype.hasOwnProperty.call(req.body, "isRendered")
           ? req.body.isRendered
           : oldWorkout.isRendered,
         exercises: req.body.exercises, //ids

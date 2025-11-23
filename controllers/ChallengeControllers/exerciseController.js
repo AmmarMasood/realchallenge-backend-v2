@@ -5,6 +5,11 @@ const { Workout } = require("../../models/ChallengeModels/workoutModel");
 const { Exercise } = require("../../models/ChallengeModels/exerciseModel");
 // const { Chal } = require("../models/equipmentModel");
 
+// Helper function to escape regex special characters
+const escapeRegex = (string) => {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
 // const createExercise = asyncHandler(async (exercise, isRendered) => {
 //   try {
 //     let newExercise;
@@ -67,6 +72,21 @@ const createExercise = asyncHandler(async (req, res, next) => {
       return;
     }
     console.log(req.body);
+
+    // Check if exercise with same title already exists for this trainer and language (case-insensitive)
+    const existingExercise = await Exercise.findOne({
+      trainer: req.body.trainer,
+      language: req.body.language,
+      title: { $regex: new RegExp(`^${escapeRegex(req.body.title)}$`, 'i') },
+    });
+
+    if (existingExercise) {
+      return res.status(409).json({
+        message: "An exercise with this name already exists for this trainer",
+        error: "DUPLICATE_EXERCISE_NAME",
+      });
+    }
+
     let newExercise = new Exercise({
       user: req.user.id,
       title: req.body.title,
@@ -101,6 +121,30 @@ const updateExercise = asyncHandler(async (req, res, next) => {
   try {
     const update = req.body;
     const exerciseId = req.params.exerciseId;
+
+    // If title or language is being updated, check for duplicates
+    if (update.title || update.language) {
+      // Get the current exercise to know which trainer and language it belongs to
+      const currentExercise = await Exercise.findById(exerciseId);
+      const trainerId = update.trainer || currentExercise.trainer;
+      const language = update.language || currentExercise.language;
+      const title = update.title || currentExercise.title;
+
+      const existingExercise = await Exercise.findOne({
+        trainer: trainerId,
+        language: language,
+        title: { $regex: new RegExp(`^${escapeRegex(title)}$`, 'i') },
+        _id: { $ne: exerciseId }, // Exclude the current exercise
+      });
+
+      if (existingExercise) {
+        return res.status(409).json({
+          message: "An exercise with this name already exists for this trainer",
+          error: "DUPLICATE_EXERCISE_NAME",
+        });
+      }
+    }
+
     const exercise = await Exercise.findByIdAndUpdate(exerciseId, update, {
       useFindAndModify: false,
       new: true,
@@ -140,22 +184,45 @@ const getAllExercises = asyncHandler(async (req, res) => {
 
 const getAllUserExercises = asyncHandler(async (req, res) => {
   let exercises;
+  const includeAssigned = req.query.includeAssigned === 'true';
+
   if (req.query.language && req.query.language.length > 0) {
     if (req.user.role === "admin") {
       exercises = await Exercise.find({
         language: req.query.language,
       }).populate(["user", "trainer"]);
     } else {
-      exercises = await Exercise.find({
-        user: req.user.id,
-        language: req.query.language,
-      }).populate(["user", "trainer"]);
+      // For trainers: optionally include exercises where they are assigned trainer
+      const query = includeAssigned
+        ? {
+            $or: [
+              { user: req.user.id },
+              { trainer: req.user.id }
+            ],
+            language: req.query.language,
+          }
+        : {
+            user: req.user.id,
+            language: req.query.language,
+          };
+
+      exercises = await Exercise.find(query).populate(["user", "trainer"]);
     }
   } else {
     if (req.user.role === "admin") {
       exercises = await Exercise.find({}).populate(["user", "trainer"]);
     } else {
-      exercises = await Exercise.find({ user: req.user.id }).populate([
+      // For trainers: optionally include exercises where they are assigned trainer
+      const query = includeAssigned
+        ? {
+            $or: [
+              { user: req.user.id },
+              { trainer: req.user.id }
+            ]
+          }
+        : { user: req.user.id };
+
+      exercises = await Exercise.find(query).populate([
         "user",
         "trainer",
       ]);

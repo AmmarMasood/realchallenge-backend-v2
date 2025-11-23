@@ -753,6 +753,16 @@ const resetUserPassword = asyncHandler(async (req, res, next) => {
 
         const results = user.save();
         if (results) {
+          const passwordResetLink = `${process.env.FRONTEND_ADD}/reset-password/${token}`;
+
+          // Console log for debugging - copy/paste this link manually
+          console.log("=============================================");
+          console.log("PASSWORD RESET LINK (for debugging):");
+          console.log(passwordResetLink);
+          console.log("User Email:", user.email);
+          console.log("Token expires in 2 hours");
+          console.log("=============================================");
+
           const mailOptions = {
             from: "no-reply@realchallenge.fit",
             to: user.email,
@@ -761,7 +771,7 @@ const resetUserPassword = asyncHandler(async (req, res, next) => {
              <h1>Real Challenge Fit</h1>
              <h2>Password Reset</h2>
              <p>We have recently received your request to reset the password</p>
-             <h5>Please click on this <a href="${process.env.FRONTEND_ADD}/reset-password/${token}">link to reset your password</a><h5>
+             <h5>Please click on this <a href="${passwordResetLink}">link to reset your password</a><h5>
              <p>This link will expire after 3 hours.</p>
            `,
           };

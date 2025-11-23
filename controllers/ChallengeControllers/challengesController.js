@@ -21,6 +21,11 @@ const {
   createNotification,
 } = require("../NotificationControllers/notificationController");
 
+// Helper function to escape regex special characters
+const escapeRegex = (string) => {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
 // @desc    Create a Challenge
 // @route   POST /api/challenges/create
 const createChallenge = asyncHandler(async (req, res, next) => {
@@ -33,6 +38,25 @@ const createChallenge = asyncHandler(async (req, res, next) => {
     if (!errors.isEmpty()) {
       res.status(422).json({ errors: errors.array() });
       return;
+    }
+
+    // Check if challenge with same name already exists for the assigned trainers and language (case-insensitive)
+    // It follows the trainer (the owner), not the creator when it's the admin
+    const trainersToCheck = req.body.trainers && req.body.trainers.length > 0
+      ? req.body.trainers
+      : [req.user.id]; // If no trainers assigned, use creator as owner
+
+    const existingChallenge = await Challenges.findOne({
+      trainers: { $in: trainersToCheck },
+      language: req.body.language,
+      challengeName: { $regex: new RegExp(`^${escapeRegex(req.body.challengeName)}$`, 'i') },
+    });
+
+    if (existingChallenge) {
+      return res.status(409).json({
+        message: "A challenge with this name and language already exists for one of the assigned trainers",
+        error: "DUPLICATE_CHALLENGE_NAME",
+      });
     }
 
     let WeeksResolved;
@@ -334,130 +358,74 @@ const getAllChallenges = asyncHandler(async (req, res) => {
 
 const getAllUserChallenges = asyncHandler(async (req, res) => {
   let challenges;
+  const includeAssigned = req.query.includeAssigned === 'true';
+
+  // Common populate configuration
+  const populateConfig = [
+    "trainers",
+    "body",
+    "tags",
+    "additionalProducts",
+    "trainersFitnessInterest",
+    "music",
+    "user",
+    {
+      path: "weeks",
+      populate: [
+        {
+          path: "workouts",
+          populate: [
+            {
+              path: "exercises.exerciseId",
+            },
+            {
+              path: "relatedEquipments",
+            },
+            {
+              path: "relatedProducts",
+            },
+          ],
+        },
+      ],
+    },
+  ];
+
   if (req.user.role === "admin") {
     if (req.query.language && req.query.language.length > 0) {
       challenges = await Challenges.find({
         language: req.query.language,
-      }).populate([
-        "trainers",
-        "body",
-        "tags",
-        "additionalProducts",
-        "trainersFitnessInterest",
-        "music",
-        //"weeks.workouts",
-        {
-          path: "weeks",
-          populate: [
-            {
-              path: "workouts",
-              populate: [
-                {
-                  path: "exercises.exerciseId",
-                },
-                {
-                  path: "relatedEquipments",
-                },
-                {
-                  path: "relatedProducts",
-                },
-              ],
-            },
-          ],
-        },
-      ]);
+      }).populate(populateConfig);
     } else {
-      challenges = await Challenges.find({}).populate([
-        "trainers",
-        "body",
-        "tags",
-        "additionalProducts",
-        "trainersFitnessInterest",
-        "music",
-        //"weeks.workouts",
-        {
-          path: "weeks",
-          populate: [
-            {
-              path: "workouts",
-              populate: [
-                {
-                  path: "exercises.exerciseId",
-                },
-                {
-                  path: "relatedEquipments",
-                },
-                {
-                  path: "relatedProducts",
-                },
-              ],
-            },
-          ],
-        },
-      ]);
+      challenges = await Challenges.find({}).populate(populateConfig);
     }
   } else {
+    // For trainers: optionally include challenges where they are in trainers array
     if (req.query.language && req.query.language.length > 0) {
-      challenges = await Challenges.find({
-        user: req.user.id,
-        language: req.query.language,
-      }).populate([
-        "trainers",
-        "body",
-        "tags",
-        "additionalProducts",
-        "trainersFitnessInterest",
-        "music",
-        //"weeks.workouts",
-        {
-          path: "weeks",
-          populate: [
-            {
-              path: "workouts",
-              populate: [
-                {
-                  path: "exercises.exerciseId",
-                },
-                {
-                  path: "relatedEquipments",
-                },
-                {
-                  path: "relatedProducts",
-                },
-              ],
-            },
-          ],
-        },
-      ]);
+      const query = includeAssigned
+        ? {
+            $or: [
+              { user: req.user.id },
+              { trainers: req.user.id }
+            ],
+            language: req.query.language,
+          }
+        : {
+            user: req.user.id,
+            language: req.query.language,
+          };
+
+      challenges = await Challenges.find(query).populate(populateConfig);
     } else {
-      challenges = await Challenges.find({ user: req.user.id }).populate([
-        "trainers",
-        "body",
-        "tags",
-        "additionalProducts",
-        "trainersFitnessInterest",
-        "music",
-        //"weeks.workouts",
-        {
-          path: "weeks",
-          populate: [
-            {
-              path: "workouts",
-              populate: [
-                {
-                  path: "exercises.exerciseId",
-                },
-                {
-                  path: "relatedEquipments",
-                },
-                {
-                  path: "relatedProducts",
-                },
-              ],
-            },
-          ],
-        },
-      ]);
+      const query = includeAssigned
+        ? {
+            $or: [
+              { user: req.user.id },
+              { trainers: req.user.id }
+            ]
+          }
+        : { user: req.user.id };
+
+      challenges = await Challenges.find(query).populate(populateConfig);
     }
   }
 
@@ -475,6 +443,32 @@ const getAllUserChallenges = asyncHandler(async (req, res) => {
 // // @route   PUT /api/challenge/:challengeId
 const updateChallenge = asyncHandler(async (req, res, next) => {
   try {
+    // If challengeName, trainers, or language is being updated, check for duplicates
+    if (req.body.challengeName || req.body.trainers || req.body.language) {
+      const challenge = await Challenges.findById(req.params.challengeId);
+
+      // Use updated values or fall back to existing values
+      const trainersToCheck = req.body.trainers !== undefined
+        ? (req.body.trainers.length > 0 ? req.body.trainers : [challenge.user])
+        : (challenge.trainers.length > 0 ? challenge.trainers : [challenge.user]);
+      const languageToCheck = req.body.language || challenge.language;
+      const nameToCheck = req.body.challengeName || challenge.challengeName;
+
+      const existingChallenge = await Challenges.findOne({
+        trainers: { $in: trainersToCheck },
+        language: languageToCheck,
+        challengeName: { $regex: new RegExp(`^${escapeRegex(nameToCheck)}$`, 'i') },
+        _id: { $ne: req.params.challengeId }, // Exclude the current challenge
+      });
+
+      if (existingChallenge) {
+        return res.status(409).json({
+          message: "A challenge with this name and language already exists for one of the assigned trainers",
+          error: "DUPLICATE_CHALLENGE_NAME",
+        });
+      }
+    }
+
     let musicsResolved;
     if (req.body.music) {
       if (req.body.music.length > 0) {

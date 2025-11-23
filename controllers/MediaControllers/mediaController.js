@@ -10,10 +10,18 @@ const fs = require("fs");
 const path = require("path");
 const ThumbnailService = require("../../services/thumbnailService");
 const VideoOptimizationService = require("../../services/videoOptimizationService");
+const {
+  sendProgressUpdate,
+  sendUploadComplete,
+  sendUploadError,
+} = require("./progressController");
 
 const MediaFiles = require("../../models/MediaManagerModels/mediaFileModel");
 const MediaFolder = require("../../models/MediaManagerModels/mediaFolderModel");
 const { User } = require("../../models/UserModels/userModel"); // Assuming you have a User model
+
+// Maximum file size: 150MB in bytes
+const MAX_FILE_SIZE = 400 * 1024 * 1024; // 400MB
 
 const unLinkFile = async (filename) => {
   const filePath = path.join(__dirname, "../../uploads/", filename);
@@ -132,7 +140,7 @@ const deleteMediaFolder = asyncHandler(async (req, res, next) => {
   }
 
   await folder.remove();
-  // await deleteFolderFromS3(req.params.id);
+  await deleteFolderFromS3(req.params.id);
   res.status(200).json({ message: "Folder and associated media deleted" });
 });
 
@@ -279,6 +287,7 @@ const getUserMediaFolders = asyncHandler(async (req, res, next) => {
     depth: 1,
     name: 1,
   });
+
   res.status(200).json({ folders });
 });
 
@@ -300,31 +309,10 @@ const getSpecificUserFolders = asyncHandler(async (req, res, next) => {
     return res.status(404).json({ message: "User not found" });
   }
 
-  // Get folders for the specific user
+  // Get folders for the specific user - return flat array like regular user endpoint
   const folders = await MediaFolder.find({ user: userId })
     .populate("user", "name email")
     .sort({ depth: 1, name: 1 });
-
-  // Organize folders in hierarchical structure
-  const folderMap = {};
-  const rootFolders = [];
-
-  // First pass: create folder map
-  folders.forEach((folder) => {
-    folderMap[folder._id] = {
-      ...folder.toObject(),
-      children: [],
-    };
-  });
-
-  // Second pass: organize hierarchy
-  folders.forEach((folder) => {
-    if (folder.parentId && folderMap[folder.parentId]) {
-      folderMap[folder.parentId].children.push(folderMap[folder._id]);
-    } else {
-      rootFolders.push(folderMap[folder._id]);
-    }
-  });
 
   res.status(200).json({
     user: {
@@ -332,7 +320,7 @@ const getSpecificUserFolders = asyncHandler(async (req, res, next) => {
       name: userExists.name,
       email: userExists.email,
     },
-    folders: rootFolders,
+    folders: folders, // Return exactly like getUserMediaFolders - keep mongoose documents
     totalFolders: folders.length,
   });
 });
@@ -351,6 +339,18 @@ const uploadMediaFile = asyncHandler(async (req, res, next) => {
 
   if (!file) {
     return res.status(400).json({ message: "No file uploaded" });
+  }
+
+  // Check file size
+  if (file.size > MAX_FILE_SIZE) {
+    await unLinkFile(file.filename);
+    return res.status(400).json({
+      message: `File size exceeds the maximum limit of ${Math.round(
+        MAX_FILE_SIZE / (1024 * 1024)
+      )}MB`,
+      fileSize: file.size,
+      maxSize: MAX_FILE_SIZE,
+    });
   }
 
   const folder = await MediaFolder.findById(folderId);
@@ -379,34 +379,39 @@ const uploadMediaFile = asyncHandler(async (req, res, next) => {
   let finalFile = file;
   let uploadResult;
 
-  // Optimize video files before upload
-  if (VideoOptimizationService.isVideoFile(file.mimetype)) {
-    try {
-      console.log("Optimizing video for streaming:", file.originalname);
-      const optimizedResult =
-        await VideoOptimizationService.processVideoForStreaming(
-          file,
-          path.dirname(file.path)
-        );
+  // VIDEO OPTIMIZATION DISABLED - To prevent EC2 instance crashes on t3.micro
+  // If you upgrade to t3.small or higher, you can re-enable this
+  // if (VideoOptimizationService.isVideoFile(file.mimetype)) {
+  //   try {
+  //     console.log("Optimizing video for streaming:", file.originalname);
+  //     const optimizedResult =
+  //       await VideoOptimizationService.processVideoForStreaming(
+  //         file,
+  //         path.dirname(file.path)
+  //       );
+  //
+  //     // Create a new file object for the optimized video
+  //     finalFile = {
+  //       ...file,
+  //       path: optimizedResult.optimizedPath,
+  //       filename: optimizedResult.optimizedFilename,
+  //       size: fs.statSync(optimizedResult.optimizedPath).size,
+  //     };
+  //
+  //     console.log("Video optimization completed");
+  //   } catch (optimizationError) {
+  //     console.error(
+  //       "Video optimization failed, using original:",
+  //       optimizationError
+  //     );
+  //     // Continue with original file if optimization fails
+  //   }
+  // }
 
-      // Create a new file object for the optimized video
-      finalFile = {
-        ...file,
-        path: optimizedResult.optimizedPath,
-        filename: optimizedResult.optimizedFilename,
-        size: fs.statSync(optimizedResult.optimizedPath).size,
-      };
-
-      console.log("Video optimization completed");
-    } catch (optimizationError) {
-      console.error(
-        "Video optimization failed, using original:",
-        optimizationError
-      );
-      // Continue with original file if optimization fails
-    }
-  }
-
+  console.log(
+    "Uploading original file (optimization disabled):",
+    file.originalname
+  );
   uploadResult = await uploadFile(finalFile, folderId);
 
   // Convert S3 URL to CloudFront URL for better performance
@@ -460,6 +465,268 @@ const uploadMediaFile = asyncHandler(async (req, res, next) => {
   res.status(201).json({ mediaFile, message: "File uploaded successfully" });
 });
 
+// @desc    Upload file to folder with progress tracking
+// @route   POST /api/media/folders/:folderId/with-progress
+// @access  private
+const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
+  const folderId = req.params.folderId;
+  const user = req.user;
+  const file = req.file;
+  const uploadId = req.body.uploadId || req.headers["x-upload-id"];
+
+  const isAdmin = req.user && req.user.role === "admin";
+
+  console.log("Uploaded file with progress tracking:", file);
+  console.log("Upload ID:", uploadId);
+
+  if (!uploadId) {
+    return res
+      .status(400)
+      .json({ message: "Upload ID is required for progress tracking" });
+  }
+
+  if (!file) {
+    sendUploadError(user._id, uploadId, new Error("No file uploaded"));
+    return res.status(400).json({ message: "No file uploaded" });
+  }
+
+  // Check file size
+  if (file.size > MAX_FILE_SIZE) {
+    await unLinkFile(file.filename);
+    const error = new Error(
+      `File size exceeds the maximum limit of ${Math.round(
+        MAX_FILE_SIZE / (1024 * 1024)
+      )}MB`
+    );
+    sendUploadError(user._id, uploadId, error);
+    return res.status(400).json({
+      message: error.message,
+      fileSize: file.size,
+      maxSize: MAX_FILE_SIZE,
+    });
+  }
+
+  try {
+    // Step 1: Validate folder (5%)
+    sendProgressUpdate(user._id, uploadId, {
+      stage: "validating",
+      progress: 5,
+      message: "Validating folder...",
+    });
+
+    const folder = await MediaFolder.findById(folderId);
+    if (!folder) {
+      sendUploadError(user._id, uploadId, new Error("Folder not found"));
+      return res.status(404).json({ message: "Folder not found" });
+    }
+
+    // Allow admin to upload to any folder, regular users only to their own
+    if (!isAdmin && folder.user.toString() !== user._id.toString()) {
+      sendUploadError(user._id, uploadId, new Error("Access denied to folder"));
+      return res.status(403).json({ message: "Access denied to folder" });
+    }
+
+    // Step 2: Check for unique filename (10%)
+    sendProgressUpdate(user._id, uploadId, {
+      stage: "checking_duplicates",
+      progress: 10,
+      message: "Checking for duplicate files...",
+    });
+
+    const existingFile = await MediaFiles.findOne({
+      folderId,
+      originalName: file.originalname,
+    });
+
+    if (existingFile) {
+      await unLinkFile(file.filename);
+      sendUploadError(
+        user._id,
+        uploadId,
+        new Error("A file with this name already exists in this folder")
+      );
+      return res
+        .status(400)
+        .json({
+          message: "A file with this name already exists in this folder",
+        });
+    }
+
+    let finalFile = file;
+    let uploadResult;
+
+    // Step 3: Video optimization DISABLED - To prevent EC2 instance crashes on t3.micro
+    // If you upgrade to t3.small or higher, you can re-enable this
+    // if (VideoOptimizationService.isVideoFile(file.mimetype)) {
+    //   sendProgressUpdate(user._id, uploadId, {
+    //     stage: "optimizing_video",
+    //     progress: 15,
+    //     message: "Optimizing video for streaming..."
+    //   });
+    //
+    //   try {
+    //     console.log("Optimizing video for streaming:", file.originalname);
+    //     const optimizedResult = await VideoOptimizationService.processVideoForStreaming(
+    //       file,
+    //       path.dirname(file.path)
+    //     );
+    //
+    //     sendProgressUpdate(user._id, uploadId, {
+    //       stage: "optimizing_video",
+    //       progress: 45,
+    //       message: "Video optimization completed"
+    //     });
+    //
+    //     // Create a new file object for the optimized video
+    //     finalFile = {
+    //       ...file,
+    //       path: optimizedResult.optimizedPath,
+    //       filename: optimizedResult.optimizedFilename,
+    //       size: fs.statSync(optimizedResult.optimizedPath).size,
+    //     };
+    //
+    //     console.log("Video optimization completed");
+    //   } catch (optimizationError) {
+    //     console.error("Video optimization failed, using original:", optimizationError);
+    //     sendProgressUpdate(user._id, uploadId, {
+    //       stage: "optimizing_video",
+    //       progress: 45,
+    //       message: "Video optimization failed, using original file"
+    //     });
+    //   }
+    // } else {
+    //   sendProgressUpdate(user._id, uploadId, {
+    //     stage: "processing",
+    //     progress: 45,
+    //     message: "Processing file..."
+    //   });
+    // }
+
+    // Skip optimization, proceed directly to upload
+    console.log(
+      "Uploading original file (optimization disabled):",
+      file.originalname
+    );
+    sendProgressUpdate(user._id, uploadId, {
+      stage: "processing",
+      progress: 45,
+      message: "Processing file (optimization disabled)...",
+    });
+
+    // Step 4: Upload to S3 (50% - 70%)
+    sendProgressUpdate(user._id, uploadId, {
+      stage: "uploading_to_s3",
+      progress: 50,
+      message: "Uploading to cloud storage...",
+    });
+
+    uploadResult = await uploadFile(finalFile, folderId);
+
+    sendProgressUpdate(user._id, uploadId, {
+      stage: "uploading_to_s3",
+      progress: 70,
+      message: "Cloud upload completed",
+    });
+
+    // Convert S3 URL to CloudFront URL for better performance
+    const s3Key = `${folderId}/${finalFile.filename}`;
+    const cloudFrontUrl = getCloudFrontUrl(s3Key);
+
+    // Initialize thumbnail URL
+    let thumbnailUrl = null;
+
+    // Step 5: Generate thumbnail for video files (70% - 85%)
+    if (ThumbnailService.isVideoFile(file.mimetype)) {
+      sendProgressUpdate(user._id, uploadId, {
+        stage: "generating_thumbnail",
+        progress: 75,
+        message: "Generating video thumbnail...",
+      });
+
+      try {
+        console.log("Generating thumbnail for video file:", file.originalname);
+        const thumbnailS3Url = await ThumbnailService.generateVideoThumbnail(
+          file,
+          folderId
+        );
+
+        // Convert thumbnail S3 URL to CloudFront URL if possible
+        if (thumbnailS3Url) {
+          const thumbnailFilename = ThumbnailService.getThumbnailFilename(
+            file.filename
+          );
+          const thumbnailS3Key = `${folderId}/${thumbnailFilename}`;
+          thumbnailUrl = getCloudFrontUrl(thumbnailS3Key);
+        }
+
+        sendProgressUpdate(user._id, uploadId, {
+          stage: "generating_thumbnail",
+          progress: 85,
+          message: "Thumbnail generated successfully",
+        });
+
+        console.log("Thumbnail generated successfully:", thumbnailUrl);
+      } catch (thumbnailError) {
+        console.error("Error generating thumbnail:", thumbnailError);
+        sendProgressUpdate(user._id, uploadId, {
+          stage: "generating_thumbnail",
+          progress: 85,
+          message: "Thumbnail generation failed, continuing...",
+        });
+      }
+    } else {
+      sendProgressUpdate(user._id, uploadId, {
+        stage: "processing",
+        progress: 85,
+        message: "Processing completed",
+      });
+    }
+
+    // Step 6: Save to database (85% - 95%)
+    sendProgressUpdate(user._id, uploadId, {
+      stage: "saving_to_database",
+      progress: 90,
+      message: "Saving file information...",
+    });
+
+    // Clean up temporary files
+    await unLinkFile(file.filename);
+    if (finalFile.path !== file.path) {
+      await unLinkFile(finalFile.filename);
+    }
+
+    const mediaFile = await MediaFiles.create({
+      user: folder.user, // Use folder owner as file owner
+      folderId: folderId,
+      filename: finalFile.filename,
+      originalName: file.originalname,
+      filelink: cloudFrontUrl, // Use CloudFront URL instead of S3 URL
+      mediaType: folder.mediaType,
+      size: finalFile.size,
+      thumbnailUrl: thumbnailUrl,
+    });
+
+    // Step 7: Complete (100%)
+    sendProgressUpdate(user._id, uploadId, {
+      stage: "completed",
+      progress: 100,
+      message: "Upload completed successfully!",
+    });
+
+    // Send completion signal
+    sendUploadComplete(user._id, uploadId, {
+      mediaFile,
+      message: "File uploaded successfully",
+    });
+
+    res.status(201).json({ mediaFile, message: "File uploaded successfully" });
+  } catch (error) {
+    console.error("Upload error:", error);
+    sendUploadError(user._id, uploadId, error);
+    res.status(500).json({ message: error.message || "Upload failed" });
+  }
+});
+
 // @desc    Get files in folder
 // @route   GET /api/media/folders/:folderId/files
 // @access  private
@@ -500,7 +767,7 @@ const deleteMediaFile = asyncHandler(async (req, res, next) => {
   }
 
   // Delete the main file from S3
-  // await deleteFile(folderId, file.filename);
+  await deleteFile(folderId, file.filename);
 
   // Delete thumbnail if it exists
   if (file.thumbnailUrl && file.mediaType === "video") {
@@ -769,6 +1036,299 @@ const compareS3vsCloudFront = asyncHandler(async (req, res, next) => {
   }
 });
 
+// @desc    Search media files and folders by filename and user (admin only)
+// @route   GET /api/media/search
+// @access  private/admin
+const searchMediaFiles = asyncHandler(async (req, res, next) => {
+  const isAdmin = req.user && req.user.role === "admin";
+
+  // Check if user is admin
+  if (!isAdmin) {
+    return res.status(403).json({ message: "Admin access required" });
+  }
+
+  const { filename, userId, mediaType, page = 1, limit = 20 } = req.query;
+
+  // Build search query for files
+  const fileSearchQuery = {};
+
+  // Search by filename (case-insensitive, partial match)
+  if (filename) {
+    fileSearchQuery.$or = [
+      { originalName: { $regex: filename, $options: "i" } },
+      { filename: { $regex: filename, $options: "i" } },
+    ];
+  }
+
+  // Filter by user ID
+  if (userId) {
+    // Validate if userId is a valid ObjectId
+    if (!userId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid user ID format" });
+    }
+    fileSearchQuery.user = userId;
+  }
+
+  // Filter by media type
+  if (mediaType && mediaType !== "all") {
+    fileSearchQuery.mediaType = mediaType;
+  }
+
+  // Build search query for folders
+  const folderSearchQuery = {};
+
+  // Filter folders by user ID
+  if (userId) {
+    folderSearchQuery.user = userId;
+  }
+
+  // Search folder names
+  if (filename) {
+    folderSearchQuery.name = { $regex: filename, $options: "i" };
+  }
+
+  // Filter folders by media type
+  if (mediaType && mediaType !== "all") {
+    folderSearchQuery.mediaType = mediaType;
+  }
+
+  try {
+    // Calculate pagination (applies only to files, folders return all matches)
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Execute searches in parallel
+    const [files, folders] = await Promise.all([
+      MediaFiles.find(fileSearchQuery)
+        .populate("user", "name email")
+        .populate("folderId", "name mediaType")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      MediaFolder.find(folderSearchQuery)
+        .populate("user", "name email")
+        .sort({ depth: 1, name: 1 }),
+    ]);
+
+    // Get total count for pagination
+    const totalFiles = await MediaFiles.countDocuments(fileSearchQuery);
+    const totalPages = Math.ceil(totalFiles / parseInt(limit));
+
+    // Helper function to build folder path
+    const getFolderPath = async (folderId) => {
+      if (!folderId) return "";
+
+      const pathParts = [];
+      let currentFolderId = folderId;
+
+      while (currentFolderId) {
+        const folder = await MediaFolder.findById(currentFolderId);
+        if (!folder) break;
+
+        pathParts.unshift(folder.name);
+        currentFolderId = folder.parentId;
+      }
+
+      return pathParts.join(" > ");
+    };
+
+    // Build folder paths for files
+    const filesWithPaths = await Promise.all(
+      files.map(async (file) => {
+        const folderPath = await getFolderPath(file.folderId._id);
+        return {
+          _id: file._id,
+          filename: file.filename,
+          originalName: file.originalName,
+          filelink: file.filelink,
+          mediaType: file.mediaType,
+          size: file.size,
+          thumbnailUrl: file.thumbnailUrl,
+          createdAt: file.createdAt,
+          folderId: file.folderId._id,
+          folderName: file.folderId.name,
+          folderPath: folderPath,
+          user: {
+            _id: file.user._id,
+            name: file.user.name,
+            email: file.user.email,
+          },
+          folder: {
+            _id: file.folderId._id,
+            name: file.folderId.name,
+            mediaType: file.folderId.mediaType,
+          },
+        };
+      })
+    );
+
+    // Build folder paths for folders
+    const foldersWithPaths = await Promise.all(
+      folders.map(async (folder) => {
+        const folderPath = await getFolderPath(folder.parentId);
+        return {
+          _id: folder._id,
+          name: folder.name,
+          mediaType: folder.mediaType,
+          depth: folder.depth,
+          parentId: folder.parentId,
+          createdAt: folder.createdAt,
+          folderPath: folderPath,
+          isDir: true,
+          user: {
+            _id: folder.user._id,
+            name: folder.user.name,
+            email: folder.user.email,
+          },
+        };
+      })
+    );
+
+    res.status(200).json({
+      files: filesWithPaths,
+      folders: foldersWithPaths,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages,
+        totalFiles,
+        filesPerPage: parseInt(limit),
+        hasNext: parseInt(page) < totalPages,
+        hasPrev: parseInt(page) > 1,
+      },
+      searchCriteria: {
+        filename: filename || null,
+        userId: userId || null,
+        mediaType: mediaType || null,
+      },
+    });
+  } catch (error) {
+    console.error("Search error:", error);
+    res.status(500).json({
+      message: "Search failed",
+      error: error.message,
+    });
+  }
+});
+
+// @desc    Search user's own media files and folders
+// @route   GET /api/media/search/my-files
+// @access  private
+const searchMyMediaFiles = asyncHandler(async (req, res, next) => {
+  const userId = req.user._id;
+  const { filename, mediaType } = req.query;
+
+  try {
+    // Build search query for files
+    const fileSearchQuery = { user: userId };
+
+    // Search by filename (case-insensitive, partial match)
+    if (filename) {
+      fileSearchQuery.$or = [
+        { originalName: { $regex: filename, $options: "i" } },
+        { filename: { $regex: filename, $options: "i" } },
+      ];
+    }
+
+    // Filter by media type
+    if (mediaType && mediaType !== "all") {
+      fileSearchQuery.mediaType = mediaType;
+    }
+
+    // Build search query for folders
+    const folderSearchQuery = { user: userId };
+
+    // Search folder names
+    if (filename) {
+      folderSearchQuery.name = { $regex: filename, $options: "i" };
+    }
+
+    // Filter folders by media type
+    if (mediaType && mediaType !== "all") {
+      folderSearchQuery.mediaType = mediaType;
+    }
+
+    // Execute searches in parallel
+    const [files, folders] = await Promise.all([
+      MediaFiles.find(fileSearchQuery)
+        .populate("folderId", "name mediaType")
+        .sort({ createdAt: -1 }),
+      MediaFolder.find(folderSearchQuery).sort({ depth: 1, name: 1 }),
+    ]);
+
+    // Helper function to build folder path
+    const getFolderPath = async (folderId) => {
+      if (!folderId) return "";
+
+      const pathParts = [];
+      let currentFolderId = folderId;
+
+      while (currentFolderId) {
+        const folder = await MediaFolder.findById(currentFolderId);
+        if (!folder) break;
+
+        pathParts.unshift(folder.name);
+        currentFolderId = folder.parentId;
+      }
+
+      return pathParts.join(" > ");
+    };
+
+    // Build folder paths for files
+    const filesWithPaths = await Promise.all(
+      files.map(async (file) => {
+        const folderPath = await getFolderPath(file.folderId._id);
+        return {
+          _id: file._id,
+          filename: file.filename,
+          originalName: file.originalName,
+          filelink: file.filelink,
+          mediaType: file.mediaType,
+          size: file.size,
+          thumbnailUrl: file.thumbnailUrl,
+          createdAt: file.createdAt,
+          folderId: file.folderId._id,
+          folderName: file.folderId.name,
+          folderPath: folderPath,
+          isDir: false,
+        };
+      })
+    );
+
+    // Build folder paths for folders
+    const foldersWithPaths = await Promise.all(
+      folders.map(async (folder) => {
+        const folderPath = await getFolderPath(folder.parentId);
+        return {
+          _id: folder._id,
+          name: folder.name,
+          mediaType: folder.mediaType,
+          depth: folder.depth,
+          parentId: folder.parentId,
+          createdAt: folder.createdAt,
+          folderPath: folderPath,
+          isDir: true,
+        };
+      })
+    );
+
+    res.status(200).json({
+      folders: foldersWithPaths,
+      files: filesWithPaths,
+      totalFolders: foldersWithPaths.length,
+      totalFiles: filesWithPaths.length,
+      searchCriteria: {
+        filename: filename || null,
+        mediaType: mediaType || null,
+      },
+    });
+  } catch (error) {
+    console.error("Search error:", error);
+    res.status(500).json({
+      message: "Search failed",
+      error: error.message,
+    });
+  }
+});
+
 module.exports = {
   testMediaRoute,
   createMediaFolder,
@@ -780,10 +1340,13 @@ module.exports = {
   getSpecificUserFolders, // New function for admin
   getUserMediaFolders,
   uploadMediaFile,
+  uploadMediaFileWithProgress, // New function with progress tracking
   getMediaFolderFiles,
   deleteMediaFile,
   updateMediaFile,
   moveMediaFile,
   compareS3vsCloudFront,
   debugCloudFrontPerformance,
+  searchMediaFiles, // New search function for admin
+  searchMyMediaFiles, // New search function for regular users
 };
