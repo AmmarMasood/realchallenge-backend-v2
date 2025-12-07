@@ -5,6 +5,7 @@ const {
   createNotification,
 } = require("../NotificationControllers/notificationController");
 const notificationMessages = require("../../utils/notificationMessages");
+const { hasRole } = require("../../middlewares/authMiddleware");
 
 // @desc    Create Recipe
 // @route   POST /api/recipes/recipe/create
@@ -115,10 +116,10 @@ const getAllRecipes = asyncHandler(async (req, res) => {
 // @desc    Get All user Recipes
 // @route   GET /api/recipes/recipe/
 const getAllUserRecipes = asyncHandler(async (req, res) => {
-  console.log("yesss", req.user.role);
+  console.log("yesss", hasRole(req.user, "admin"));
   let recipes;
   if (req.query.language && req.query.language.length > 0) {
-    if (req.user.role === "admin") {
+    if (hasRole(req.user, "admin")) {
       recipes = await Recipe.find({ language: req.query.language })
         .populate("ingredients.name")
         .populate("alternativeLanguage");
@@ -131,7 +132,7 @@ const getAllUserRecipes = asyncHandler(async (req, res) => {
         .populate("alternativeLanguage");
     }
   } else {
-    if (req.user.role === "admin") {
+    if (hasRole(req.user, "admin")) {
       recipes = await Recipe.find({})
         .populate("ingredients.name")
         .populate("alternativeLanguage");
@@ -160,7 +161,7 @@ const updateRecipe = asyncHandler(async (req, res, next) => {
   try {
     const update = req.body;
     const recipeId = req.params.recipeId;
-    if (req.user.role === "admin") {
+    if (hasRole(req.user, "admin")) {
       await Recipe.findByIdAndUpdate(recipeId, update, {
         useFindAndModify: false,
       });

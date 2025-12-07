@@ -6,6 +6,7 @@
 const asyncHandler = require("express-async-handler");
 const { body, validationResult } = require("express-validator");
 const { roles } = require("../../utils/roles");
+const { hasRole } = require("../../middlewares/authMiddleware");
 const { Challenges } = require("../../models/ChallengeModels/challengesModel");
 const { Trainer } = require("../../models/UserModels/trainerModel");
 const {
@@ -390,7 +391,7 @@ const getAllUserChallenges = asyncHandler(async (req, res) => {
     },
   ];
 
-  if (req.user.role === "admin") {
+  if (hasRole(req.user, "admin")) {
     if (req.query.language && req.query.language.length > 0) {
       challenges = await Challenges.find({
         language: req.query.language,
@@ -514,9 +515,9 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
         results: req.body.results ? req.body.results : challenge.results,
         allowComments: req.body.allowComments,
         allowReviews: req.body.allowReviews,
-        isPublic: req.user.role === "admin" ? req.body.isPublic : false,
+        isPublic: hasRole(req.user, "admin") ? req.body.isPublic : false,
         adminApproved:
-          req.user.role === "admin" ? req.body.adminApproved : false,
+          hasRole(req.user, "admin") ? req.body.adminApproved : false,
         weeks: req.body.weeks ? req.body.weeks : challenge.weeks,
         body: req.body.body ? req.body.body : challenge.body,
         tags: req.body.tags ? req.body.tags : challenge.tags,

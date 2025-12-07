@@ -15,6 +15,7 @@ const {
   sendUploadComplete,
   sendUploadError,
 } = require("./progressController");
+const { hasRole } = require("../../middlewares/authMiddleware");
 
 const MediaFiles = require("../../models/MediaManagerModels/mediaFileModel");
 const MediaFolder = require("../../models/MediaManagerModels/mediaFolderModel");
@@ -48,7 +49,7 @@ const createMediaFolder = asyncHandler(async (req, res, next) => {
   const user = req.user;
 
   // If admin and forUser is provided, create folder for that user
-  if (user.role === "admin" && forUser) {
+  if (hasRole(user, "admin") && forUser) {
     const targetUser = await User.findById(forUser);
     if (!targetUser) {
       return res.status(404).json({ message: "Target user not found" });
@@ -71,7 +72,7 @@ const createMediaFolder = asyncHandler(async (req, res, next) => {
     }
     if (
       parent.user.toString() !== user._id.toString() &&
-      user.role !== "admin"
+      !hasRole(user, "admin")
     ) {
       return res
         .status(403)
@@ -128,7 +129,7 @@ const getMediaFolder = asyncHandler(async (req, res, next) => {
 // @route   DELETE /api/media/folder/:id
 // @access  private
 const deleteMediaFolder = asyncHandler(async (req, res, next) => {
-  const isAdmin = req.user && req.user.role === "admin";
+  const isAdmin = hasRole(req.user, "admin");
   const folder = await MediaFolder.findById(req.params.id);
   if (!folder) {
     return res.status(404).json({ message: "Folder not found" });
@@ -185,7 +186,7 @@ const updateMediaFolder = asyncHandler(async (req, res, next) => {
 // @route   GET /api/media/folders/admin
 // @access  private/admin
 const getAllMediaFoldersGroupedByUser = asyncHandler(async (req, res, next) => {
-  const isAdmin = req.user && req.user.role === "admin";
+  const isAdmin = hasRole(req.user, "admin");
   // Check if user is admin
   if (!isAdmin) {
     return res.status(403).json({ message: "Admin access required" });
@@ -295,7 +296,7 @@ const getUserMediaFolders = asyncHandler(async (req, res, next) => {
 // @route   GET /api/media/folders/user/:userId
 // @access  private/admin
 const getSpecificUserFolders = asyncHandler(async (req, res, next) => {
-  const isAdmin = req.user && req.user.role === "admin";
+  const isAdmin = hasRole(req.user, "admin");
   // Check if user is admin
   if (!isAdmin) {
     return res.status(403).json({ message: "Admin access required" });
@@ -333,7 +334,7 @@ const uploadMediaFile = asyncHandler(async (req, res, next) => {
   const user = req.user;
   const file = req.file;
 
-  const isAdmin = req.user && req.user.role === "admin";
+  const isAdmin = hasRole(req.user, "admin");
 
   console.log("Uploaded file:", file);
 
@@ -474,7 +475,7 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
   const file = req.file;
   const uploadId = req.body.uploadId || req.headers["x-upload-id"];
 
-  const isAdmin = req.user && req.user.role === "admin";
+  const isAdmin = hasRole(req.user, "admin");
 
   console.log("Uploaded file with progress tracking:", file);
   console.log("Upload ID:", uploadId);
@@ -732,7 +733,7 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
 // @access  private
 const getMediaFolderFiles = asyncHandler(async (req, res, next) => {
   const folderId = req.params.folderId;
-  const isAdmin = req.user && req.user.role === "admin";
+  const isAdmin = hasRole(req.user, "admin");
 
   // Verify folder access
   const folder = await MediaFolder.findById(folderId);
@@ -754,7 +755,7 @@ const getMediaFolderFiles = asyncHandler(async (req, res, next) => {
 // @access  private
 const deleteMediaFile = asyncHandler(async (req, res, next) => {
   const { folderId, fileId } = req.params;
-  const isAdmin = req.user && req.user.role === "admin";
+  const isAdmin = hasRole(req.user, "admin");
   const file = await MediaFiles.findOne({ _id: fileId, folderId });
 
   if (!file) {
@@ -793,7 +794,7 @@ const deleteMediaFile = asyncHandler(async (req, res, next) => {
 const updateMediaFile = asyncHandler(async (req, res, next) => {
   const { folderId, fileId } = req.params;
   const { originalName } = req.body;
-  const isAdmin = req.user && req.user.role === "admin";
+  const isAdmin = hasRole(req.user, "admin");
 
   const file = await MediaFiles.findOne({ _id: fileId, folderId });
   if (!file) {
@@ -829,7 +830,7 @@ const updateMediaFile = asyncHandler(async (req, res, next) => {
 const moveMediaFile = asyncHandler(async (req, res, next) => {
   const { folderId, fileId } = req.params;
   const { newFolderId } = req.body;
-  const isAdmin = req.user && req.user.role === "admin";
+  const isAdmin = hasRole(req.user, "admin");
 
   // Find the file
   const file = await MediaFiles.findOne({ _id: fileId, folderId });
@@ -1040,7 +1041,7 @@ const compareS3vsCloudFront = asyncHandler(async (req, res, next) => {
 // @route   GET /api/media/search
 // @access  private/admin
 const searchMediaFiles = asyncHandler(async (req, res, next) => {
-  const isAdmin = req.user && req.user.role === "admin";
+  const isAdmin = hasRole(req.user, "admin");
 
   // Check if user is admin
   if (!isAdmin) {

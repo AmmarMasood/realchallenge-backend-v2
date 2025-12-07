@@ -3,6 +3,7 @@ const asyncHandler = require("express-async-handler");
 const { body, validationResult } = require("express-validator");
 const { Workout } = require("../../models/ChallengeModels/workoutModel");
 const { Exercise } = require("../../models/ChallengeModels/exerciseModel");
+const { hasRole } = require("../../middlewares/authMiddleware");
 // const { Chal } = require("../models/equipmentModel");
 
 // Helper function to escape regex special characters
@@ -187,7 +188,7 @@ const getAllUserExercises = asyncHandler(async (req, res) => {
   const includeAssigned = req.query.includeAssigned === 'true';
 
   if (req.query.language && req.query.language.length > 0) {
-    if (req.user.role === "admin") {
+    if (hasRole(req.user, "admin")) {
       exercises = await Exercise.find({
         language: req.query.language,
       }).populate(["user", "trainer"]);
@@ -209,7 +210,7 @@ const getAllUserExercises = asyncHandler(async (req, res) => {
       exercises = await Exercise.find(query).populate(["user", "trainer"]);
     }
   } else {
-    if (req.user.role === "admin") {
+    if (hasRole(req.user, "admin")) {
       exercises = await Exercise.find({}).populate(["user", "trainer"]);
     } else {
       // For trainers: optionally include exercises where they are assigned trainer

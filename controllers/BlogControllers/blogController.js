@@ -1,6 +1,7 @@
 const asyncHandler = require("express-async-handler");
 const { body, validationResult } = require("express-validator");
 const { Blog } = require("../../models/BlogModels/blogModel");
+const { hasRole, hasAnyRole } = require("../../middlewares/authMiddleware");
 
 // @desc    Create Blog
 // @route   POST /api/blog/create
@@ -17,7 +18,7 @@ const createBlog = asyncHandler(async (req, res, next) => {
       return;
     }
     console.log(req.body);
-    if (req.user.role == "admin" || req.user.role == "blogger") {
+    if (hasAnyRole(req.user, ["admin", "blogger"])) {
       let newBlog = new Blog({
         language: req.body.language,
         alternativeLanguage: req.body.alternativeLanguage,
@@ -92,7 +93,7 @@ const getAllUserBlogs = asyncHandler(async (req, res) => {
   let blogs;
 
   if (req.query.language && req.query.language.length > 0) {
-    if (req.user.role === "admin") {
+    if (hasRole(req.user, "admin")) {
       blogs = await Blog.find({ language: req.query.language })
         .populate("user")
         .populate("alternativeLanguage")
@@ -109,7 +110,7 @@ const getAllUserBlogs = asyncHandler(async (req, res) => {
         .populate("category");
     }
   } else {
-    if (req.user.role === "admin") {
+    if (hasRole(req.user, "admin")) {
       blogs = await Blog.find()
         .populate("user")
         .populate("alternativeLanguage")
@@ -176,7 +177,7 @@ const updateBlog = asyncHandler(async (req, res, next) => {
   try {
     const update = req.body;
     const blogId = req.params.blogId;
-    if (req.user.role === "admin") {
+    if (hasRole(req.user, "admin")) {
       await Blog.findByIdAndUpdate(blogId, update, {
         useFindAndModify: false,
       });

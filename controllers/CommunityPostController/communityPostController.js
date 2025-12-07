@@ -1,6 +1,7 @@
 const asyncHandler = require("express-async-handler");
 const { validationResult } = require("express-validator");
 const { roles } = require("../../utils/roles");
+const { hasRole } = require("../../middlewares/authMiddleware");
 const {
   CommunityPostModel,
 } = require("../../models/CommunityPostModels/CommunityPostModel");
@@ -21,7 +22,7 @@ const createPost = asyncHandler(async (req, res, next) => {
       return;
     }
 
-    console.log(req.user.role);
+    console.log(hasRole(req.user, "admin"));
     const user = await User.findById(req.user.id).select("-passwordHash");
 
     console.log(user);
@@ -97,7 +98,7 @@ const getAllPosts = asyncHandler(async (req, res) => {
 // @desc    Get Post by ID
 // @route   GET /api/community-posts/:id
 const getPostById = asyncHandler(async (req, res) => {
-  console.log(req.user.role);
+  console.log(hasRole(req.user, "admin"));
   const post = await CommunityPostModel.findById(req.params.id).populate(
     "user"
   );
@@ -146,7 +147,7 @@ const deletePost = asyncHandler(async (req, res) => {
   }
 
   // check if post belong to that user
-  if (post.user.toString() !== req.user.id && req.user.role !== "admin") {
+  if (post.user.toString() !== req.user.id && !hasRole(req.user, "admin")) {
     return res
       .status(401)
       .json({ msg: "User Not Authorized to remove the post" });

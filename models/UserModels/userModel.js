@@ -53,6 +53,49 @@ const userSchema = mongoose.Schema(
         "customer",
       ],
     },
+    roles: {
+      type: [String],
+      default: function() {
+        return this.role ? [this.role] : ["customer"];
+      },
+      enum: [
+        "admin",
+        "trainer",
+        "nutrist",
+        "blogger",
+        "shopmanager",
+        "customer",
+      ],
+      validate: [
+        {
+          validator: function(roles) {
+            // Must have at least one role
+            return roles && roles.length > 0;
+          },
+          message: "User must have at least one role"
+        },
+        {
+          validator: function(roles) {
+            // If user has "admin" role, they can ONLY have "admin"
+            if (roles.includes("admin") && roles.length > 1) {
+              return false;
+            }
+            return true;
+          },
+          message: "Admin role cannot be combined with other roles"
+        },
+        {
+          validator: function(roles) {
+            // If user has "customer" role, they can ONLY have "customer"
+            if (roles.includes("customer") && roles.length > 1) {
+              return false;
+            }
+            return true;
+          },
+          message: "Customer role cannot be combined with other roles"
+        }
+      ]
+    },
     gender: {
       type: String,
       enum: ["male", "female", "other"],

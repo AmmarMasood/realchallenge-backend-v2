@@ -92,11 +92,12 @@ const authUser = asyncHandler(async (req, res, next) => {
           email: user.email,
           isActive: user.isActive,
           user_id: user.id,
-          role: user.role,
+          roles: user.roles,
+          role: user.roles[0],
           points: user.points,
           token: generateToken(
             user._id,
-            user.role,
+            user.roles,
             user.email,
             user.username,
             user.isActive
@@ -205,13 +206,14 @@ const registerUser = asyncHandler(async (req, res, next) => {
         mesage: "User Created Successfully",
         _id: newUser._id,
         username: newUser.username,
-        role: newUser.role,
+        roles: newUser.roles,
+        role: newUser.roles[0],
         isActive: newUser.isActive,
         emailVerification: newUser.resetTokenExpire,
         email: newUser.email,
         token: generateToken(
           newUser._id,
-          newUser.role,
+          newUser.roles,
           newUser.email,
           newUser.username,
           newUser.isActive
@@ -526,11 +528,12 @@ const registerUserWithSocial = asyncHandler(async (req, res, next) => {
           mesage: "User Created Successfully",
           _id: newUser._id,
           username: newUser.username,
-          role: newUser.role,
+          roles: newUser.roles,
+          role: newUser.roles[0],
 
           token: generateToken(
             newUser._id,
-            newUser.role,
+            newUser.roles,
             newUser.email,
             newUser.username,
             newUser.isActive
@@ -562,11 +565,12 @@ const registerUserWithSocial = asyncHandler(async (req, res, next) => {
           mesage: "User Created Successfully",
           _id: newUser._id,
           username: newUser.username,
-          role: newUser.role,
+          roles: newUser.roles,
+          role: newUser.roles[0],
 
           token: generateToken(
             newUser._id,
-            newUser.role,
+            newUser.roles,
             newUser.email,
             newUser.username,
             newUser.isActive
@@ -607,10 +611,11 @@ const socialLogin = asyncHandler(async (req, res, next) => {
             message: "User Logged In successfully!",
             username: user.username,
             user_id: user.id,
-            role: user.role,
+            roles: user.roles,
+            role: user.roles[0],
             token: generateToken(
               user._id,
-              user.role,
+              user.roles,
               user.email,
               user.username,
               user.isActive
@@ -633,10 +638,11 @@ const socialLogin = asyncHandler(async (req, res, next) => {
             message: "User Logged In successfully!",
             username: user.username,
             user_id: user.id,
-            role: user.role,
+            roles: user.roles,
+            role: user.roles[0],
             token: generateToken(
               user._id,
-              user.role,
+              user.roles,
               user.email,
               user.username,
               user.isActive

@@ -2,6 +2,68 @@ const jwt = require("jsonwebtoken");
 const { User } = require("../models/UserModels/userModel");
 const asyncHandler = require("express-async-handler");
 
+// ============================================
+// HELPER FUNCTIONS FOR MULTI-ROLE SUPPORT
+// ============================================
+
+/**
+ * Check if user has a specific role
+ * @param {Object} user - User object from req.user
+ * @param {String} role - Role to check
+ * @returns {Boolean} - True if user has the role
+ */
+const hasRole = (user, role) => {
+  if (!user || !user.roles || !Array.isArray(user.roles)) {
+    return false;
+  }
+  return user.roles.includes(role);
+};
+
+/**
+ * Check if user has ANY of the specified roles (OR logic)
+ * @param {Object} user - User object from req.user
+ * @param {String|Array} requiredRoles - Single role or array of roles
+ * @returns {Boolean} - True if user has at least one of the required roles
+ */
+const hasAnyRole = (user, requiredRoles) => {
+  if (!user || !user.roles || !Array.isArray(user.roles)) {
+    return false;
+  }
+
+  // Normalize requiredRoles to array
+  const rolesArray = Array.isArray(requiredRoles) ? requiredRoles : [requiredRoles];
+
+  // Check if user has ANY of the required roles (OR logic)
+  return user.roles.some(userRole => rolesArray.includes(userRole));
+};
+
+/**
+ * Validate role combinations
+ * Rules:
+ * - Admin can ONLY be alone (["admin"])
+ * - Customer can ONLY be alone (["customer"])
+ * - Other roles can be combined (["trainer", "blogger"])
+ * @param {Array} roles - Array of roles to validate
+ * @returns {Object} - { isValid: boolean, message: string }
+ */
+const validateRoleCombination = (roles) => {
+  if (!roles || !Array.isArray(roles) || roles.length === 0) {
+    return { isValid: false, message: "User must have at least one role" };
+  }
+
+  // If "admin" is present, it must be the only role
+  if (roles.includes("admin") && roles.length > 1) {
+    return { isValid: false, message: "Admin role cannot be combined with other roles" };
+  }
+
+  // If "customer" is present, it must be the only role
+  if (roles.includes("customer") && roles.length > 1) {
+    return { isValid: false, message: "Customer role cannot be combined with other roles" };
+  }
+
+  return { isValid: true, message: "Role combination is valid" };
+};
+
 const protect = asyncHandler(async (req, res, next) => {
   let token;
 
@@ -45,21 +107,13 @@ const allowBlogRoutesAccess = asyncHandler(async (req, res, next) => {
 
       req.user = await User.findById(decoded.id).select("-passwordHash");
 
-      if (
-        req.user &&
-        (req.user.role === "trainer" ||
-          req.user.role === "nutrist" ||
-          req.user.role === "shopmanager")
-      ) {
+      // Check if user has ANY of the allowed roles (admin or blogger)
+      if (req.user && hasAnyRole(req.user, ["admin", "blogger"])) {
+        next();
+      } else {
         return res
           .status(401)
-          .json({ message: "Not authorized, token failed" });
-      }
-      if (
-        req.user &&
-        (req.user.role === "admin" || req.user.role === "blogger")
-      ) {
-        next();
+          .json({ message: "Not authorized - requires admin or blogger role" });
       }
     } catch (error) {
       console.error(error);
@@ -89,20 +143,23 @@ const allowAllExceptCustomer = asyncHandler(async (req, res, next) => {
 
       req.user = await User.findById(decoded.id).select("-passwordHash");
 
-      if (req.user && req.user.role === "customer") {
+      // NEW: Check if user has only customer role
+      // If user has ["customer", "trainer"], they should be allowed
+      // If user has only ["customer"], they should be denied
+      const hasOnlyCustomerRole = req.user.roles && req.user.roles.length === 1 && req.user.roles[0] === "customer";
+
+      if (hasOnlyCustomerRole) {
         return res
           .status(401)
-          .json({ message: "Not authorized, token failed" });
+          .json({ message: "Not authorized - customers not allowed" });
       }
-      if (
-        req.user &&
-        (req.user.role === "admin" ||
-          req.user.role === "trainer" ||
-          req.user.role === "nutrist" ||
-          req.user.role === "blogger" ||
-          req.user.role === "shopmanager")
-      ) {
+
+      if (req.user && hasAnyRole(req.user, ["admin", "trainer", "nutrist", "blogger", "shopmanager"])) {
         next();
+      } else {
+        return res
+          .status(401)
+          .json({ message: "Not authorized - requires non-customer role" });
       }
     } catch (error) {
       console.error(error);
@@ -118,7 +175,7 @@ const allowAllExceptCustomer = asyncHandler(async (req, res, next) => {
 });
 
 const admin = (req, res, next) => {
-  if (req.user && req.user.role == "admin") {
+  if (req.user && hasRole(req.user, "admin")) {
     next();
   } else {
     res.status(401);
@@ -127,46 +184,47 @@ const admin = (req, res, next) => {
 };
 
 const trainer = (req, res, next) => {
-  if (req.user && req.user.role == "trainer") {
+  if (req.user && hasRole(req.user, "trainer")) {
     next();
   } else {
     res.status(401);
-    throw new Error("Not authorized as an Trainer");
+    throw new Error("Not authorized as a Trainer");
   }
 };
+
 const customer = (req, res, next) => {
-  if (req.user && req.user.role == "customer") {
+  if (req.user && hasRole(req.user, "customer")) {
     next();
   } else {
     res.status(401);
-    throw new Error("Not authorized as an Customer");
+    throw new Error("Not authorized as a Customer");
   }
 };
 
 const nutrist = (req, res, next) => {
-  if (req.user && req.user.role == "nutrist") {
+  if (req.user && hasRole(req.user, "nutrist")) {
     next();
   } else {
     res.status(401);
-    throw new Error("Not authorized as an Nutrist");
+    throw new Error("Not authorized as a Nutrist");
   }
 };
 
 const blogger = (req, res, next) => {
-  if (req.user && req.user.role == "blogger") {
+  if (req.user && hasRole(req.user, "blogger")) {
     next();
   } else {
     res.status(401);
-    throw new Error("Not authorized as an Blogger");
+    throw new Error("Not authorized as a Blogger");
   }
 };
 
 const shopManager = (req, res, next) => {
-  if (req.user && req.user.role == "shopmanager") {
+  if (req.user && hasRole(req.user, "shopmanager")) {
     next();
   } else {
     res.status(401);
-    throw new Error("Not authorized as an Shop-Manager");
+    throw new Error("Not authorized as a Shop-Manager");
   }
 };
 
@@ -189,4 +247,7 @@ module.exports = {
   customer,
   allowAllExceptCustomer,
   allowBlogRoutesAccess,
+  hasRole,
+  hasAnyRole,
+  validateRoleCombination,
 };
