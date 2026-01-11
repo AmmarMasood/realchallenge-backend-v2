@@ -5,6 +5,9 @@ const trainerGoalSchema = mongoose.Schema(
     name: {
       type: String,
     },
+    icon: {
+      type: String,
+    },
     language: {
       type: String,
     },

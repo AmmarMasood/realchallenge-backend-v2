@@ -17,6 +17,7 @@ const createTrainerGoal = asyncHandler(async (req, res, next) => {
     console.log(req.body);
     let newBody = new TrainerGoal({
       name: req.body.name,
+      icon: req.body.icon,
       language: req.body.language,
     });
 
