@@ -2,6 +2,8 @@ const asyncHandler = require("express-async-handler");
 const { body, validationResult } = require("express-validator");
 const { Blog } = require("../../models/BlogModels/blogModel");
 const { hasRole, hasAnyRole } = require("../../middlewares/authMiddleware");
+const { generateTranslationKey } = require("../../utils/translationKey");
+const NotificationService = require("../../services/notificationService");
 
 // @desc    Create Blog
 // @route   POST /api/blog/create
@@ -19,9 +21,13 @@ const createBlog = asyncHandler(async (req, res, next) => {
     }
     console.log(req.body);
     if (hasAnyRole(req.user, ["admin", "blogger"])) {
+      // Generate or use provided translationKey
+      const translationKey = req.body.translationKey ||
+        generateTranslationKey("blog", req.body.title);
+
       let newBlog = new Blog({
+        translationKey,
         language: req.body.language,
-        alternativeLanguage: req.body.alternativeLanguage,
         title: req.body.title,
         user: req.user.id,
         featuredImage: req.body.featuredImage,
@@ -37,6 +43,10 @@ const createBlog = asyncHandler(async (req, res, next) => {
       if (!newBlog) {
         return res.status(400).json("Blog cannot be created!");
       } else {
+        // Send notification to all users if sendNotification is true
+        if (req.body.sendNotification) {
+          await NotificationService.blogCreated(newBlog, req.user.id);
+        }
         return res.status(201).json({
           message: "Blog Created Successfully",
           newBlog,
@@ -60,18 +70,18 @@ const getAllBlogs = asyncHandler(async (req, res) => {
   if (req.query.langauge && req.query.language.length > 0) {
     blogs = await Blog.find({
       isPublic: true,
+      adminApproved: true,
       language: req.query.language,
     })
       .populate("user")
-      .populate("alternativeLanguage")
       .select("-hashPassword")
       .populate("category");
   } else {
     blogs = await Blog.find({
       isPublic: true,
+      adminApproved: true,
     })
       .populate("user")
-      .populate("alternativeLanguage")
       .select("-hashPassword")
       .populate("category");
   }
@@ -219,6 +229,50 @@ const destroy = asyncHandler(async (req, res, next) => {
   }
 });
 
+// @desc    Get all translations of a blog by translationKey
+// @route   GET /api/blog/translations/:translationKey
+// @access  Public
+const getTranslationsByKey = asyncHandler(async (req, res) => {
+  const { translationKey } = req.params;
+  const { excludeLanguage } = req.query;
+
+  let query = { translationKey };
+  if (excludeLanguage) {
+    query.language = { $ne: excludeLanguage };
+  }
+
+  const translations = await Blog.find(query)
+    .select('_id title language translationKey')
+    .lean();
+
+  res.status(200).json({
+    translations,
+    count: translations.length,
+  });
+});
+
+// @desc    Get a blog in a specific language by translationKey
+// @route   GET /api/blog/translation/:translationKey/:language
+// @access  Public
+const getBlogByTranslationKey = asyncHandler(async (req, res) => {
+  const { translationKey, language } = req.params;
+
+  const blog = await Blog.findOne({ translationKey, language })
+    .populate("user")
+    .select("-hashPassword")
+    .populate("category");
+
+  if (blog) {
+    res.status(200).json({
+      blog,
+      message: "Blog retrieved successfully",
+    });
+  } else {
+    res.status(404);
+    throw new Error("Blog not found for this language");
+  }
+});
+
 module.exports = {
   createBlog,
   deleteBlog,
@@ -227,4 +281,6 @@ module.exports = {
   getAllUserBlogs,
   getBlogById,
   destroy,
+  getTranslationsByKey,
+  getBlogByTranslationKey,
 };

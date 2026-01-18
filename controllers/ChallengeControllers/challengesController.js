@@ -8,6 +8,7 @@ const { body, validationResult } = require("express-validator");
 const { roles } = require("../../utils/roles");
 const { hasRole } = require("../../middlewares/authMiddleware");
 const { Challenges } = require("../../models/ChallengeModels/challengesModel");
+const { generateTranslationKey } = require("../../utils/translationKey");
 const { Trainer } = require("../../models/UserModels/trainerModel");
 const {
   CustomerDetails,
@@ -18,9 +19,7 @@ const {
   createMusicWithChallenges,
   updateMusicWithChallenges,
 } = require("./musicController");
-const {
-  createNotification,
-} = require("../NotificationControllers/notificationController");
+const NotificationService = require("../../services/notificationService");
 
 // Helper function to escape regex special characters
 const escapeRegex = (string) => {
@@ -97,8 +96,13 @@ const createChallenge = asyncHandler(async (req, res, next) => {
 
     console.log("Musics", musicsResolved);
 
+    // Generate or use provided translationKey
+    const translationKey = req.body.translationKey ||
+      generateTranslationKey("challenge", req.body.challengeName);
+
     let newChallenge = new Challenges({
       user: req.user.id,
+      translationKey,
       language: req.body.language,
       challengeName: req.body.challengeName,
       description: req.body.description,
@@ -111,13 +115,13 @@ const createChallenge = asyncHandler(async (req, res, next) => {
       videoThumbnailLink: req.body.videoThumbnailLink,
       videoLink: req.body.videoLink,
       access: req.body.access,
-      trainers: req.body.trainers, //TODO
+      trainers: req.body.trainers,
       challengeGoals: req.body.challengeGoals,
       tags: req.body.tags,
       body: req.body.body,
       duration: req.body.duration,
       difficulty: req.body.difficulty,
-      weeks: WeeksResolved, //TODO
+      weeks: WeeksResolved,
       music: musicsResolved,
       results: req.body.results,
       informationList: req.body.informationList,
@@ -125,7 +129,7 @@ const createChallenge = asyncHandler(async (req, res, next) => {
       isPublic: req.body.isPublic,
       allowReviews: req.body.allowReviews,
       createPost: req.body.createPost,
-      alternativeLanguage: req.body.alternativeLanguage,
+      // alternativeLanguage removed - using translationKey for multi-language support
     });
 
     newChallenge = await newChallenge.save();
@@ -135,7 +139,6 @@ const createChallenge = asyncHandler(async (req, res, next) => {
       "tags",
       "additionalProducts",
       "music",
-      "alternativeLanguage",
       //"weeks.workouts",
       {
         path: "weeks",
@@ -161,17 +164,10 @@ const createChallenge = asyncHandler(async (req, res, next) => {
       return res.status(400).json("Challenge cannot be created!");
     } else {
       if (req.body.sendNotification) {
-        await createNotification({
-          userGroup: "customer",
-          type: "new-challenge",
-          title: notificationMessages.challengeMessage.replace(
-            "{challengeName}",
-            newChallenge.challengeName
-          ),
-          body: challengeName.description,
-          onClick: `/challenge/${newChallenge.challengeName}/${newChallenge._id}`,
-          sentBy: req.user.id,
-        });
+        await NotificationService.challengeCreated(
+          { name: newChallenge.challengeName, _id: newChallenge._id },
+          req.user.id
+        );
       }
 
       return res.status(201).json({
@@ -285,6 +281,7 @@ const getAllChallenges = asyncHandler(async (req, res) => {
   if (req.query.language && req.query.language.length > 0) {
     challenges = await Challenges.find({
       isPublic: true,
+      adminApproved: true,
       language: req.query.language,
     }).populate([
       "trainers",
@@ -317,6 +314,7 @@ const getAllChallenges = asyncHandler(async (req, res) => {
   } else {
     challenges = await Challenges.find({
       isPublic: true,
+      adminApproved: true,
     }).populate([
       "trainers",
       "body",
@@ -682,7 +680,7 @@ const createChallengeComment = asyncHandler(async (req, res, next) => {
     }
     const { text } = req.body;
 
-    const challenge = await Challenges.findById(req.params.id);
+    const challenge = await Challenges.findById(req.params.id).populate("trainers");
     if (challenge) {
       const comment = {
         user: req.user._id,
@@ -696,6 +694,20 @@ const createChallengeComment = asyncHandler(async (req, res, next) => {
       const updatedChallenge = await Challenges.findById(
         req.params.id
       ).populate("comments.user");
+
+      // Notify trainers about the new comment
+      const trainerIds = challenge.trainers?.map((t) =>
+        typeof t === "object" ? t._id || t.user : t
+      ) || [];
+      if (trainerIds.length > 0) {
+        await NotificationService.commentOnChallenge(
+          challenge,
+          trainerIds,
+          req.user._id.toString(),
+          req.user.username || req.user.firstName || "Someone"
+        );
+      }
+
       res.status(201).json({ comments: updatedChallenge.comments });
     } else {
       res.status(404);
@@ -739,6 +751,66 @@ const destroy = asyncHandler(async (req, res, next) => {
   }
 });
 
+// @desc    Get all translations of a challenge by translationKey
+// @route   GET /api/challenges/translations/:translationKey
+const getTranslationsByKey = asyncHandler(async (req, res) => {
+  const { translationKey } = req.params;
+  const { excludeLanguage } = req.query;
+
+  let query = { translationKey };
+
+  // Optionally exclude a specific language (useful for getting other translations)
+  if (excludeLanguage) {
+    query.language = { $ne: excludeLanguage };
+  }
+
+  const translations = await Challenges.find(query)
+    .select('_id challengeName language translationKey')
+    .lean();
+
+  res.status(200).json({
+    translations,
+    count: translations.length,
+  });
+});
+
+// @desc    Get a challenge in a specific language by translationKey
+// @route   GET /api/challenges/translation/:translationKey/:language
+const getChallengeByTranslationKey = asyncHandler(async (req, res) => {
+  const { translationKey, language } = req.params;
+
+  const challenge = await Challenges.findOne({ translationKey, language }).populate([
+    "trainers",
+    "body",
+    "tags",
+    "trainersFitnessInterest",
+    "additionalProducts",
+    "music",
+    "comments.user",
+    "reviews.user",
+    {
+      path: "weeks",
+      populate: [
+        {
+          path: "workouts",
+          populate: [
+            { path: "exercises" },
+            { path: "relatedEquipments" },
+            { path: "relatedProducts" },
+          ],
+        },
+      ],
+    },
+  ]);
+
+  if (challenge) {
+    res.json(challenge);
+  } else {
+    res.status(404);
+    throw new Error("Challenge not found for this language");
+  }
+});
+
 module.exports = {
   createChallenge,
   getChallengeById,
@@ -751,4 +823,6 @@ module.exports = {
   getWeekByID,
   getAllUserChallenges,
   destroy,
+  getTranslationsByKey,
+  getChallengeByTranslationKey,
 };

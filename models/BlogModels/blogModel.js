@@ -1,15 +1,18 @@
 const mongoose = require("mongoose");
+const { SUPPORTED_LANGUAGES } = require("../../utils/language");
 
 const blogSchema = mongoose.Schema(
   {
+    translationKey: {
+      type: String,
+      index: true,
+    },
     language: {
       type: String,
       required: true,
+      enum: SUPPORTED_LANGUAGES,
     },
-    alternativeLanguage: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Blog",
-    },
+    // alternativeLanguage removed - using translationKey for multi-language support
     title: {
       type: String,
       required: true,

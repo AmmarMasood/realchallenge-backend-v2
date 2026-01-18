@@ -13,12 +13,27 @@ const notificationSchema = mongoose.Schema(
         "new-offer",
         "subscription",
         "next-workout",
+        "system",
+        "achievement",
       ],
     },
-    title: {
+    // Multi-language support: use titleKey + params instead of hardcoded title
+    titleKey: {
       type: String,
       required: true,
     },
+    bodyKey: {
+      type: String,
+      required: true,
+    },
+    // Dynamic parameters for interpolation (e.g., { challengeName: "Summer Fitness" })
+    params: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+    // Legacy fields (kept for backward compatibility with old notifications)
+    title: { type: String },
+    body: { type: String },
     userGroup: {
       type: String,
       required: true,
@@ -29,9 +44,9 @@ const notificationSchema = mongoose.Schema(
         "blogger",
         "shopmanager",
         "customer",
+        "all",
       ],
     },
-    body: { type: String, required: true },
     onClick: { type: String },
     createdAt: { type: Date, default: Date.now },
     readAt: { type: Date },

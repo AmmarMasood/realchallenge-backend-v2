@@ -14,6 +14,7 @@ const { User } = require("../../models/UserModels/userModel");
 const dotenv = require("dotenv");
 const { Challenges } = require("../../models/ChallengeModels/challengesModel");
 const rp = require("request-promise");
+const NotificationService = require("../../services/notificationService");
 
 const mollieClient = createMollieClient({
   apiKey: "test_T2KdmDqS6gacG8TBpRNbhWqH7pbrcV",
@@ -389,6 +390,12 @@ const updateChallengeOnSubscription = async (req, res) => {
             new: true,
           }
         );
+
+        // Notify user about challenge access (for free challenges)
+        if (!challengeFound) {
+          await NotificationService.challengePurchased(challenge, userId);
+        }
+
         return res.status(200).json(updatedCustomerDetails);
         // await user.save();
       } else {
@@ -413,6 +420,12 @@ const updateChallengeOnSubscription = async (req, res) => {
                 new: true,
               }
             );
+
+          // Notify user about challenge access (for subscribed users)
+          if (!challengeFound) {
+            await NotificationService.challengePurchased(challenge, userId);
+          }
+
           return res.status(200).json(updatedCustomerDetails);
         } else {
           throw new Error("No subscription found for this user.");

@@ -10,8 +10,12 @@ const {
   createRecipeReview,
   createRecipeComment,
   getAllUserRecipes,
+  getTranslationsByKey,
+  getRecipeByTranslationKey,
 } = require("../../controllers/RecipeControllers/recipeController");
 
+router.get("/translations/:translationKey", getTranslationsByKey);
+router.get("/translation/:translationKey/:language", getRecipeByTranslationKey);
 router.get("/", getAllRecipes);
 router.get("/all/users", protect, getAllUserRecipes);
 router.post("/create", protect, createRecipe);

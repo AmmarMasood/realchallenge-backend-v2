@@ -9,6 +9,7 @@ const {
   getUserProfile,
   getAllUsers,
   updateUserProfile,
+  updateUserRoles,
   deleteUser,
   getUserById,
   allowIfLoggedin,
@@ -56,6 +57,9 @@ router
   .get(protect, grantAccess("readAny", "profile"), getUserById)
   .put(protect, grantAccess("updateOwn", "profile"), updateUserProfile)
   .delete(protect, grantAccess("deleteAny", "profile"), deleteUser);
+
+// Update user roles (admin only)
+router.put("/:userId/roles", protect, admin, updateUserRoles);
 
 router.route("/destroyUsers").get(destroy);
 

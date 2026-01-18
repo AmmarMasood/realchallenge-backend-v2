@@ -13,8 +13,12 @@ const {
   deleteBlog,
   getBlogById,
   getAllUserBlogs,
+  getTranslationsByKey,
+  getBlogByTranslationKey,
 } = require("../../controllers/BlogControllers/blogController");
 
+router.get("/translations/:translationKey", getTranslationsByKey);
+router.get("/translation/:translationKey/:language", getBlogByTranslationKey);
 router.get("/all", getAllBlogs);
 router.get("/user/all", protect, getAllUserBlogs);
 router.get("/:blogId", getBlogById);

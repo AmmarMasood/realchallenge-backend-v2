@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { SUPPORTED_LANGUAGES } = require("../../utils/language");
 
 // Challenge Review Schema
 const reviewSchema = mongoose.Schema(
@@ -33,13 +34,16 @@ const commentSchema = mongoose.Schema(
 
 const challengesSchema = mongoose.Schema(
   {
-    alternativeLanguage: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Challenges",
+    translationKey: {
+      type: String,
+      index: true,
     },
+    // alternativeLanguage removed - using translationKey for multi-language support
+    // All challenges with the same translationKey are translations of each other
     language: {
       type: String,
       required: true,
+      enum: SUPPORTED_LANGUAGES,
     },
     user: {
       type: mongoose.Schema.Types.ObjectId,

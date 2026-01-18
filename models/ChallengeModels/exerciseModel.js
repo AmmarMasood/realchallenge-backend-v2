@@ -1,10 +1,17 @@
 const mongoose = require("mongoose");
+const { SUPPORTED_LANGUAGES } = require("../../utils/language");
 
 const exerciseSchema = mongoose.Schema(
   {
+    translationKey: {
+      type: String,
+      index: true,
+    },
     language: {
       type: String,
+      enum: SUPPORTED_LANGUAGES,
     },
+    // alternativeLanguage removed - using translationKey for multi-language support
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -27,14 +34,8 @@ const exerciseSchema = mongoose.Schema(
       required: true,
     },
     description: {
-      type: String, //0:34
+      type: String,
     },
-    // break: {
-    //   type: Number,
-    // },
-    // exerciseGroupName: {
-    //   type: String,
-    // },
     voiceOverLink: {
       type: String,
     },
@@ -42,7 +43,7 @@ const exerciseSchema = mongoose.Schema(
   { timestamps: true }
 );
 
-// Compound unique index to prevent duplicate exercise titles per trainer
-exerciseSchema.index({ trainer: 1, title: 1 }, { unique: true });
+// Compound unique index to prevent duplicate exercise titles per trainer and language
+exerciseSchema.index({ trainer: 1, title: 1, language: 1 }, { unique: true });
 
 exports.Exercise = mongoose.model("Exercise", exerciseSchema);

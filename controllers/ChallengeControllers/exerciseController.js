@@ -4,7 +4,8 @@ const { body, validationResult } = require("express-validator");
 const { Workout } = require("../../models/ChallengeModels/workoutModel");
 const { Exercise } = require("../../models/ChallengeModels/exerciseModel");
 const { hasRole } = require("../../middlewares/authMiddleware");
-// const { Chal } = require("../models/equipmentModel");
+const { getOppositeLanguage } = require("../../utils/language");
+const { generateTranslationKey } = require("../../utils/translationKey");
 
 // Helper function to escape regex special characters
 const escapeRegex = (string) => {
@@ -88,29 +89,34 @@ const createExercise = asyncHandler(async (req, res, next) => {
       });
     }
 
+    // Generate or use provided translationKey
+    const translationKey = req.body.translationKey ||
+      generateTranslationKey("exercise", req.body.title);
+
     let newExercise = new Exercise({
       user: req.user.id,
+      translationKey,
       title: req.body.title,
       videoURL: req.body.videoURL,
       videoThumbnailURL: req.body.videoThumbnailURL,
       trainer: req.body.trainer,
-      // break: req.body.break,
-      // exerciseLength: req.body.exerciseLength,
-      // exerciseGroupName: req.body.exerciseGroupName,
       voiceOverLink: req.body.voiceOverLink,
       description: req.body.description,
       language: req.body.language,
+      // alternativeLanguage removed - using translationKey for multi-language support
     });
 
     newExercise = await newExercise.save();
     if (!newExercise) {
       return res.status(400).json("Exercise cannot be created!");
-    } else {
-      return res.status(201).json({
-        message: "Exercise Created Successfully",
-        newExercise,
-      });
     }
+
+    // alternativeLanguage bidirectional update removed - using translationKey for multi-language support
+
+    return res.status(201).json({
+      message: "Exercise Created Successfully",
+      newExercise,
+    });
   } catch (err) {
     return next(err);
   }
@@ -186,12 +192,13 @@ const getAllExercises = asyncHandler(async (req, res) => {
 const getAllUserExercises = asyncHandler(async (req, res) => {
   let exercises;
   const includeAssigned = req.query.includeAssigned === 'true';
+  const populateFields = ["user", "trainer"];
 
   if (req.query.language && req.query.language.length > 0) {
     if (hasRole(req.user, "admin")) {
       exercises = await Exercise.find({
         language: req.query.language,
-      }).populate(["user", "trainer"]);
+      }).populate(populateFields);
     } else {
       // For trainers: optionally include exercises where they are assigned trainer
       const query = includeAssigned
@@ -207,11 +214,11 @@ const getAllUserExercises = asyncHandler(async (req, res) => {
             language: req.query.language,
           };
 
-      exercises = await Exercise.find(query).populate(["user", "trainer"]);
+      exercises = await Exercise.find(query).populate(populateFields);
     }
   } else {
     if (hasRole(req.user, "admin")) {
-      exercises = await Exercise.find({}).populate(["user", "trainer"]);
+      exercises = await Exercise.find({}).populate(populateFields);
     } else {
       // For trainers: optionally include exercises where they are assigned trainer
       const query = includeAssigned
@@ -223,10 +230,7 @@ const getAllUserExercises = asyncHandler(async (req, res) => {
           }
         : { user: req.user.id };
 
-      exercises = await Exercise.find(query).populate([
-        "user",
-        "trainer",
-      ]);
+      exercises = await Exercise.find(query).populate(populateFields);
     }
   }
 
@@ -284,6 +288,49 @@ const destroy = asyncHandler(async (req, res, next) => {
   }
 });
 
+// @desc    Get all translations of an exercise by translationKey
+// @route   GET /api/exercise/translations/:translationKey
+// @access  Public
+const getTranslationsByKey = asyncHandler(async (req, res) => {
+  const { translationKey } = req.params;
+  const { excludeLanguage } = req.query;
+
+  let query = { translationKey };
+  if (excludeLanguage) {
+    query.language = { $ne: excludeLanguage };
+  }
+
+  const translations = await Exercise.find(query)
+    .select('_id title language translationKey')
+    .lean();
+
+  res.status(200).json({
+    translations,
+    count: translations.length,
+  });
+});
+
+// @desc    Get an exercise in a specific language by translationKey
+// @route   GET /api/exercise/translation/:translationKey/:language
+// @access  Public
+const getExerciseByTranslationKey = asyncHandler(async (req, res) => {
+  const { translationKey, language } = req.params;
+
+  const exercise = await Exercise.findOne({ translationKey, language })
+    .populate("user")
+    .populate("trainer");
+
+  if (exercise) {
+    res.status(200).json({
+      exercise,
+      message: "Exercise retrieved successfully",
+    });
+  } else {
+    res.status(404);
+    throw new Error("Exercise not found for this language");
+  }
+});
+
 module.exports = {
   createExercise,
   updateExercise,
@@ -292,4 +339,6 @@ module.exports = {
   deleteExercise,
   getAllUserExercises,
   destroy,
+  getTranslationsByKey,
+  getExerciseByTranslationKey,
 };

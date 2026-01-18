@@ -660,7 +660,7 @@ const socialLogin = asyncHandler(async (req, res, next) => {
 
 //=============================================================================================================
 
-// @desc    Create users by role
+// @desc    Create users by role(s)
 // @route   POST /api/users/create
 // @access  Private/Admin
 const createUser = asyncHandler(async (req, res, next) => {
@@ -679,13 +679,28 @@ const createUser = asyncHandler(async (req, res, next) => {
         .status(400)
         .json("User Already exist with this username/email.");
     }
+
+    // Handle both single role (backward compat) and roles array
+    let rolesArray = [];
+    if (req.body.roles && Array.isArray(req.body.roles) && req.body.roles.length > 0) {
+      rolesArray = req.body.roles;
+    } else if (req.body.role) {
+      rolesArray = [req.body.role];
+    } else {
+      rolesArray = ["customer"];
+    }
+
+    // Primary role is the first one in the array
+    const primaryRole = rolesArray[0];
+
     let newUser = new User({
       username: req.body.username,
       email: req.body.email,
       firstName: req.body.firstName ? req.body.firstName : "",
       lastName: req.body.lastName ? req.body.lastName : "",
       passwordHash: bcrypt.hashSync(req.body.password, 10),
-      role: req.body.role,
+      role: primaryRole,
+      roles: rolesArray,
       heroBanner: req.body.heroBanner ? req.body.heroBanner : "",
       videoTrailerLink: req.body.videoTrailerLink
         ? req.body.videoTrailerLink
@@ -699,7 +714,8 @@ const createUser = asyncHandler(async (req, res, next) => {
     if (!newUser) {
       return res.status(400).json("User cannot be created!");
     } else {
-      if (newUser.role !== "customer") {
+      // Create media folders for non-customer users
+      if (!rolesArray.includes("customer")) {
         const defaultFolders = [
           { name: "Videos", mediaType: "video" },
           { name: "Audios", mediaType: "audio" },
@@ -717,14 +733,15 @@ const createUser = asyncHandler(async (req, res, next) => {
       }
 
       return res.status(201).json({
-        mesage: "User Created Successfully",
+        message: "User Created Successfully",
         _id: newUser._id,
         username: newUser.username,
         role: newUser.role,
+        roles: newUser.roles,
 
         token: generateToken(
           newUser._id,
-          newUser.role,
+          newUser.roles,
           newUser.email,
           newUser.username,
           newUser.isActive
@@ -918,6 +935,68 @@ const destroy = asyncHandler(async (req, res, next) => {
   }
 });
 
+// @desc    Update user roles (admin only)
+// @route   PUT /api/users/:userId/roles
+// @access  Private/Admin
+const updateUserRoles = asyncHandler(async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const { roles } = req.body;
+
+    // Validate roles array
+    if (!roles || !Array.isArray(roles) || roles.length === 0) {
+      return res.status(400).json({
+        message: "Roles must be a non-empty array",
+      });
+    }
+
+    // Validate each role is valid
+    const validRoles = ["admin", "trainer", "nutrist", "blogger", "shopmanager", "customer"];
+    const invalidRoles = roles.filter(role => !validRoles.includes(role));
+    if (invalidRoles.length > 0) {
+      return res.status(400).json({
+        message: `Invalid roles: ${invalidRoles.join(", ")}`,
+      });
+    }
+
+    // Validate role combinations
+    if (roles.includes("admin") && roles.length > 1) {
+      return res.status(400).json({
+        message: "Admin role cannot be combined with other roles",
+      });
+    }
+
+    if (roles.includes("customer") && roles.length > 1) {
+      return res.status(400).json({
+        message: "Customer role cannot be combined with other roles",
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Update both role (primary) and roles (array)
+    user.role = roles[0];
+    user.roles = roles;
+    await user.save();
+
+    res.status(200).json({
+      message: "User roles updated successfully",
+      user: {
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        roles: user.roles,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = {
   authUser,
   registerUser,
@@ -925,6 +1004,7 @@ module.exports = {
   getUserProfile,
   getAllUsers,
   updateUserProfile,
+  updateUserRoles,
   deleteUser,
   allowIfLoggedin,
   grantAccess,

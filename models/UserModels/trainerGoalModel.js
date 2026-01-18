@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { SUPPORTED_LANGUAGES } = require("../../utils/language");
 
 const trainerGoalSchema = mongoose.Schema(
   {
@@ -10,6 +11,7 @@ const trainerGoalSchema = mongoose.Schema(
     },
     language: {
       type: String,
+      enum: SUPPORTED_LANGUAGES,
     },
   },
   { timestamps: true }

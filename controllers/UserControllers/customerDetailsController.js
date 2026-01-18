@@ -13,6 +13,7 @@ const {
   ChallengeGoals,
 } = require("../../models/ChallengeModels/challengeGoalsModel");
 const { IdentityStore } = require("aws-sdk");
+const NotificationService = require("../../services/notificationService");
 
 // @desc    Create Customer role by ID
 // @route   POST /api/customer/create
@@ -822,6 +823,12 @@ const updateChallengeProgress = asyncHandler(async (req, res, next) => {
               useFindAndModify: false,
             }
           );
+          // Send notification for challenge completion
+          await NotificationService.challengeCompleted(
+            challengeInformation,
+            req.params.customerId,
+            challengeInformation.points
+          );
         }
       } else {
         console.log("here 3");
@@ -846,6 +853,12 @@ const updateChallengeProgress = asyncHandler(async (req, res, next) => {
             {
               useFindAndModify: false,
             }
+          );
+          // Send notification for challenge completion
+          await NotificationService.challengeCompleted(
+            challengeInformation,
+            req.params.customerId,
+            challengeInformation.points
           );
         }
       }

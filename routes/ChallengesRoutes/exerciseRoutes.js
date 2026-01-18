@@ -10,8 +10,12 @@ const {
   deleteExercise,
   getAllUserExercises,
   destroy,
+  getTranslationsByKey,
+  getExerciseByTranslationKey,
 } = require("../../controllers/ChallengeControllers/exerciseController");
 
+router.get("/translations/:translationKey", getTranslationsByKey);
+router.get("/translation/:translationKey/:language", getExerciseByTranslationKey);
 router.get("/", getAllExercises);
 router.get("/user/all", protect, getAllUserExercises);
 router.post("/create", protect, createExercise);

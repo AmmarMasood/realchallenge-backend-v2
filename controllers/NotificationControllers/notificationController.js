@@ -2,23 +2,114 @@ const {
   Notification,
 } = require("../../models/Notifications/notificationModal");
 const { User } = require("../../models/UserModels/userModel");
+const { createNotificationData } = require("../../utils/notificationMessages");
 
+/**
+ * Create a notification (internal use)
+ * @param {Object} data - Notification data
+ * @param {string} data.type - Notification type (from notificationMessages.js)
+ * @param {string} data.notificationType - 'broadcast' or 'personal'
+ * @param {Object} data.params - Dynamic parameters for translation interpolation
+ * @param {string} data.userGroup - Target user group
+ * @param {string} data.sentBy - Sender identifier
+ * @param {string} data.onClick - Navigation path when clicked
+ * @param {ObjectId} data.notificationFor - User ID (required for personal notifications)
+ * @returns {Promise<Notification>}
+ */
 exports.createNotification = async (data) => {
   try {
-    const { user, type, title, body, onClick, sentBy, userGroup } = data;
-    const notification = await Notification.create({
-      user,
+    const {
       type,
-      title,
-      body,
+      notificationType = "broadcast",
+      params = {},
+      userGroup,
+      sentBy,
+      onClick,
+      notificationFor,
+      titleKey,
+      bodyKey,
+    } = data;
+
+    // Map notification type string to model enum
+    const typeMap = {
+      newChallenge: "new-challenge",
+      newRecipe: "new-recipe",
+      newArticle: "new-article",
+      newOffer: "new-offer",
+      subscription: "subscription",
+      subscriptionCreated: "subscription",
+      subscriptionExpiring: "subscription",
+      subscriptionExpired: "subscription",
+      nextWorkout: "next-workout",
+      achievementUnlocked: "achievement",
+      systemAnnouncement: "system",
+    };
+
+    // Get notification keys from helper or use provided keys
+    let notificationData;
+    if (titleKey && bodyKey) {
+      // Direct keys provided (for admin custom notifications)
+      notificationData = { titleKey, bodyKey, params };
+    } else {
+      // Use helper to get keys from type
+      notificationData = createNotificationData(type, params);
+    }
+
+    const notification = await Notification.create({
+      type: typeMap[type] || type,
+      titleKey: notificationData.titleKey,
+      bodyKey: notificationData.bodyKey,
+      params: notificationData.params,
       onClick,
       sentBy,
       userGroup,
+      notificationType,
+      notificationFor,
     });
 
     return notification;
   } catch (error) {
     throw new Error(error.message);
+  }
+};
+
+/**
+ * Create notification via API (admin only)
+ * @param {Request} req - Express request object
+ * @param {Response} res - Express response object
+ */
+exports.createNotificationAdmin = async (req, res) => {
+  try {
+    const {
+      type,
+      notificationType = "broadcast",
+      params = {},
+      userGroup,
+      onClick,
+      notificationFor,
+      titleKey,
+      bodyKey,
+    } = req.body;
+
+    const notification = await exports.createNotification({
+      type,
+      notificationType,
+      params,
+      userGroup,
+      sentBy: req.user.id,
+      onClick,
+      notificationFor,
+      titleKey,
+      bodyKey,
+    });
+
+    res.status(201).json({
+      message: "Notification created successfully",
+      notification,
+    });
+  } catch (error) {
+    console.error("Error creating notification:", error);
+    res.status(500).json({ message: error.message });
   }
 };
 
@@ -62,17 +153,22 @@ exports.markNotificationAsRead = async (req, res) => {
 };
 
 /**
- * Get notifications for a user
+ * Get notifications for a user with pagination
  * @param {Request} req - Express request object
  * @param {Response} res - Express response object
  * @returns {Promise<void>}
  */
 exports.getUserNotifications = async (req, res) => {
   try {
-    const userId = req.user.id; // Assuming you have a middleware that sets the req.user object
-    let userCreationDate = await User.findById(userId).select("createdAt"); // Assuming you have a User model
-    // Find all notifications for the user, only notificataion that were created for user after they were created
-    let notifications = await Notification.find({
+    const userId = req.user.id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const userCreationDate = await User.findById(userId).select("createdAt");
+
+    // Build query for notifications
+    const query = {
       $or: [
         { notificationType: "broadcast" },
         {
@@ -80,24 +176,84 @@ exports.getUserNotifications = async (req, res) => {
           createdAt: { $gte: userCreationDate.createdAt },
         },
       ],
-    }).sort({ createdAt: -1 });
+    };
 
-    // at alreadyRead
+    // Get total count for pagination
+    const totalCount = await Notification.countDocuments(query);
+
+    // Get paginated notifications
+    let notifications = await Notification.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    // Add read status
     notifications = notifications.map((n) => {
       const read = n.readBy.some((r) => r.user.toString() === userId);
       return { ...n.toObject(), read };
     });
 
-    const unreadNotifications = notifications.filter(
+    // Count unread (from all notifications, not just this page)
+    const allNotifications = await Notification.find(query);
+    const unreadCount = allNotifications.filter(
       (n) => !n.readBy.some((r) => r.user.toString() === userId)
-    );
+    ).length;
 
     res.json({
       notifications,
-      unreadNotifications: unreadNotifications.length,
+      unreadCount,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalCount / limit),
+        totalCount,
+        hasMore: skip + notifications.length < totalCount,
+      },
     });
   } catch (error) {
     console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/**
+ * Mark all notifications as read for a user
+ * @param {Request} req - Express request object
+ * @param {Response} res - Express response object
+ * @returns {Promise<void>}
+ */
+exports.markAllNotificationsAsRead = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const userCreationDate = await User.findById(userId).select("createdAt");
+
+    // Find all unread notifications for the user
+    const query = {
+      $or: [
+        { notificationType: "broadcast" },
+        {
+          notificationFor: userId,
+          createdAt: { $gte: userCreationDate.createdAt },
+        },
+      ],
+      "readBy.user": { $ne: userId },
+    };
+
+    const notifications = await Notification.find(query);
+
+    // Mark all as read
+    await Promise.all(
+      notifications.map((n) => {
+        n.readBy.push({ user: userId, readAt: new Date() });
+        return n.save();
+      })
+    );
+
+    res.json({
+      message: "All notifications marked as read",
+      markedCount: notifications.length,
+    });
+  } catch (error) {
+    console.error("Error marking all notifications as read:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

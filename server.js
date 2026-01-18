@@ -41,6 +41,7 @@ const faqRouter = require("./routes/FaqRoutes/faqRoutes");
 const couponsRouter = require("./routes/CouponsRoutes/couponRoutes");
 const adminRequestRouter = require("./routes/AdminRequestRoutes/adminRequestRoutes");
 const notificationRouter = require("./routes/NotificationRoutes/notificationRoutes");
+const translationRouter = require("./routes/TranslationRoutes/translationRoutes");
 
 // Connecting Database
 connectDB();
@@ -86,6 +87,7 @@ app.use("/api/blog/category", blogCategoryRouter);
 app.use("/api/blog/", blogsRouter);
 app.use("/api/coupons", couponsRouter);
 app.use("/api/notification", notificationRouter);
+app.use("/api/translations", translationRouter);
 // app.use("https://api.mollie.com/", subscriptionRouter);
 app.use("/api/auth/mollie", subscriptionRouter);
 
