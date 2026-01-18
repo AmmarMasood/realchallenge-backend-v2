@@ -266,13 +266,28 @@ const createSubscription = async (req, res) => {
       res.status(422).json({ errors: errors.array() });
       return;
     }
-    const user = await User.findById(req.body.id);
-    if (user.customerDetails.membership) {
+    const user = await User.findById(req.body.id).populate("customerDetails");
+
+    // Check if user already has an active membership
+    if (user?.customerDetails?.membership?.length > 0) {
       return res.status(400).json({
         message:
           "Already Subcribed to Other Package. kindly revoke that subcription first.",
       });
-    } else {
+    }
+
+    // Create customerDetails if it doesn't exist
+    if (!user.customerDetails) {
+      const newCustomerDetails = new CustomerDetails({});
+      await newCustomerDetails.save();
+      user.customerDetails = newCustomerDetails._id;
+      await user.save();
+      // Re-fetch user with populated customerDetails
+      const updatedUser = await User.findById(req.body.id).populate("customerDetails");
+      user.customerDetails = updatedUser.customerDetails;
+    }
+
+    {
       const subscription = await mollieClient.customers_subscriptions.create({
         customerId: req.body.custId,
         amount: {
@@ -313,7 +328,7 @@ const createSubscription = async (req, res) => {
 
             const updatedCustomerDetails =
               await CustomerDetails.findByIdAndUpdate(
-                updatedUser.customerDetails._id,
+                updatedUser.customerDetails,  // customerDetails is already the ObjectId
                 { membership: newMembership },
                 {
                   useFindAndModify: false,
@@ -360,16 +375,27 @@ const updateChallengeOnSubscription = async (req, res) => {
     console.log("breww");
     const { challengeId, userId } = req.body;
 
-    const user = await User.findById(userId).populate("customerDetails");
+    let user = await User.findById(userId).populate("customerDetails");
     console.log("userrrrrrrrrrrrr", user);
     const challenge = await Challenges.findById(challengeId);
     console.log("ammar", challenge);
+
+    // Create customerDetails if it doesn't exist
+    if (user && !user.customerDetails) {
+      const newCustomerDetails = new CustomerDetails({});
+      await newCustomerDetails.save();
+      user.customerDetails = newCustomerDetails._id;
+      await user.save();
+      // Re-fetch user with populated customerDetails
+      user = await User.findById(userId).populate("customerDetails");
+    }
+
     if (user) {
       if (challenge.user.toString() === userId) {
         return res.status(200).json("Success");
       } else if (challenge.access.includes("FREE")) {
         console.log("free");
-        let subscribedChallenges = user.customerDetails.challenges
+        let subscribedChallenges = user.customerDetails?.challenges
           ? user.customerDetails.challenges
           : [];
         // check if challenge already exist
@@ -400,7 +426,7 @@ const updateChallengeOnSubscription = async (req, res) => {
         // await user.save();
       } else {
         if (user.subcriptionId || user.role === "admin") {
-          let subscribedChallenges = user.customerDetails.challenges
+          let subscribedChallenges = user.customerDetails?.challenges
             ? user.customerDetails.challenges
             : [];
 

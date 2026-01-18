@@ -107,10 +107,10 @@ const NotificationService = {
   async challengeCreated(challenge, senderId) {
     return createNotification({
       type: "newChallenge",
-      params: { challengeName: challenge.name || challenge.title },
+      params: { challengeName: challenge.challengeName },
       userGroup: "customer",
       sentBy: senderId,
-      onClick: `/challenge/${challenge.slug || challenge.name?.toLowerCase().replace(/\s+/g, "-")}/${challenge._id}`,
+      onClick: `/challenge/${challenge.challengeName?.toLowerCase().replace(/\s+/g, "-")}/${challenge._id}`,
       notificationType: "broadcast",
     });
   },
@@ -155,10 +155,10 @@ const NotificationService = {
   async challengePurchased(challenge, userId) {
     return createNotification({
       type: "challengePurchased",
-      params: { challengeName: challenge.name || challenge.title },
+      params: { challengeName: challenge.challengeName },
       userGroup: "customer",
       sentBy: "system",
-      onClick: `/challenge/${challenge.slug || challenge.name?.toLowerCase().replace(/\s+/g, "-")}/${challenge._id}`,
+      onClick: `/challenge/${challenge.challengeName?.toLowerCase().replace(/\s+/g, "-")}/${challenge._id}`,
       notificationType: "personal",
       notificationFor: userId,
     });
@@ -174,7 +174,7 @@ const NotificationService = {
     return createNotification({
       type: "challengeCompleted",
       params: {
-        challengeName: challenge.name || challenge.title,
+        challengeName: challenge.challengeName,
         pointsEarned: pointsEarned.toString(),
       },
       userGroup: "customer",
@@ -195,10 +195,10 @@ const NotificationService = {
 
     return createBatchNotifications(trainerIds, {
       type: "challengeLive",
-      params: { challengeName: challenge.name || challenge.title },
+      params: { challengeName: challenge.challengeName },
       userGroup: "trainer",
       sentBy: "system",
-      onClick: `/challenge/${challenge.slug || challenge.name?.toLowerCase().replace(/\s+/g, "-")}/${challenge._id}`,
+      onClick: `/challenge/${challenge.challengeName?.toLowerCase().replace(/\s+/g, "-")}/${challenge._id}`,
     });
   },
 
@@ -256,11 +256,11 @@ const NotificationService = {
       params: {
         commenterName,
         contentType: "challenge",
-        contentName: challenge.name || challenge.title,
+        contentName: challenge.challengeName,
       },
       userGroup: "trainer",
       sentBy: commenterId,
-      onClick: `/challenge/${challenge.slug || challenge.name?.toLowerCase().replace(/\s+/g, "-")}/${challenge._id}`,
+      onClick: `/challenge/${challenge.challengeName?.toLowerCase().replace(/\s+/g, "-")}/${challenge._id}`,
     });
   },
 

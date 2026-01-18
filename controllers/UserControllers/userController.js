@@ -187,37 +187,31 @@ const registerUser = asyncHandler(async (req, res, next) => {
                 "Account Verification Link",
                 mailOptions.html
               );
-              res.status(200).json({
-                message:
-                  "Success! Please Confirm your email to verify your registeration!",
-              });
             } catch (error) {
               console.log("Error sending email", error);
-              res.status(500).json({
-                message:
-                  "Technical Issue!, Please click on resend for verify your Email.",
-              });
+              // Continue anyway - user is created, email just failed
             }
+
+            // Send response with user data (only once, after email attempt)
+            return res.status(201).json({
+              message: "User Created Successfully",
+              _id: newUser._id,
+              username: newUser.username,
+              roles: newUser.roles,
+              role: newUser.roles[0],
+              isActive: newUser.isActive,
+              emailVerification: newUser.resetTokenExpire,
+              email: newUser.email,
+              token: generateToken(
+                newUser._id,
+                newUser.roles,
+                newUser.email,
+                newUser.username,
+                newUser.isActive
+              ),
+            });
           }
         }
-      });
-
-      return res.status(201).json({
-        mesage: "User Created Successfully",
-        _id: newUser._id,
-        username: newUser.username,
-        roles: newUser.roles,
-        role: newUser.roles[0],
-        isActive: newUser.isActive,
-        emailVerification: newUser.resetTokenExpire,
-        email: newUser.email,
-        token: generateToken(
-          newUser._id,
-          newUser.roles,
-          newUser.email,
-          newUser.username,
-          newUser.isActive
-        ),
       });
     }
   } catch (err) {
