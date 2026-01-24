@@ -1,6 +1,7 @@
 const express = require("express");
 const {
   getAllTrainerGoals,
+  getTrainerGoalsByTrainerId,
   createTrainerGoal,
   deleteTrainerGoal,
   updateTrainerGoal,
@@ -28,9 +29,14 @@ router.get("/:trainerId", getTrainerById);
 router.put("/:trainerId", protect, updateTrainerById);
 
 router.post("/:trainerId/comments", protect, createtrainerComment);
-router.get("/trainerGoals/all", getAllTrainerGoals);
-router.post("/trainerGoals", createTrainerGoal);
-router.delete("/trainerGoals/:goalId", deleteTrainerGoal);
-router.put("/trainerGoals/:goalId", updateTrainerGoal);
+
+// Trainer Goals routes - protected (for managing own goals)
+router.get("/trainerGoals/all", protect, getAllTrainerGoals);
+router.post("/trainerGoals", protect, createTrainerGoal);
+router.delete("/trainerGoals/:goalId", protect, deleteTrainerGoal);
+router.put("/trainerGoals/:goalId", protect, updateTrainerGoal);
+
+// Public route - view trainer's goals on their profile
+router.get("/trainerGoals/trainer/:trainerId", getTrainerGoalsByTrainerId);
 
 module.exports = router;

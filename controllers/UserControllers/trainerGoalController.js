@@ -14,11 +14,15 @@ const createTrainerGoal = asyncHandler(async (req, res, next) => {
       res.status(422).json({ errors: errors.array() });
       return;
     }
-    console.log(req.body);
+
+    // Get trainer ID from authenticated user
+    const trainerId = req.user._id;
+
     let newBody = new TrainerGoal({
       name: req.body.name,
       icon: req.body.icon,
       language: req.body.language,
+      trainerId: trainerId,
     });
 
     newBody = await newBody.save();
@@ -37,14 +41,37 @@ const createTrainerGoal = asyncHandler(async (req, res, next) => {
 
 const updateTrainerGoal = asyncHandler(async (req, res, next) => {
   try {
-    const update = req.body;
-    const mealTypeId = req.params.goalId;
-    await TrainerGoal.findByIdAndUpdate(mealTypeId, update, {
+    const trainerId = req.user._id;
+    const goalId = req.params.goalId;
+
+    // Find the goal first to check ownership
+    const existingGoal = await TrainerGoal.findById(goalId);
+
+    if (!existingGoal) {
+      res.status(404);
+      throw new Error("Trainer Goal not found");
+    }
+
+    // Check if the goal belongs to the current user
+    if (existingGoal.trainerId.toString() !== trainerId.toString()) {
+      res.status(403);
+      throw new Error("Not authorized to update this goal");
+    }
+
+    // Only allow updating name, icon, language (not trainerId)
+    const update = {
+      name: req.body.name,
+      icon: req.body.icon,
+      language: req.body.language,
+    };
+
+    await TrainerGoal.findByIdAndUpdate(goalId, update, {
       useFindAndModify: false,
     });
-    const mealType = await TrainerGoal.findById(mealTypeId);
+
+    const updatedGoal = await TrainerGoal.findById(goalId);
     res.status(200).json({
-      data: mealType,
+      data: updatedGoal,
       message: "Trainer Fitness Interest Updated",
     });
   } catch (error) {
@@ -65,19 +92,23 @@ const updateTrainerGoal = asyncHandler(async (req, res, next) => {
 //   }
 // });
 
-// @desc    Get All body
+// @desc    Get All trainer goals for the current user
 // @route   GET /api/trainers/trainerGoals/all
 const getAllTrainerGoals = asyncHandler(async (req, res) => {
-  let body;
+  const trainerId = req.user._id;
+
+  let query = { trainerId: trainerId };
+
+  // Optionally filter by language
   if (req.query.language && req.query.language.length > 0) {
-    body = await TrainerGoal.find({ language: req.query.language });
-  } else {
-    body = await TrainerGoal.find({});
+    query.language = req.query.language;
   }
-  console.log("lmao");
-  if (body) {
+
+  const goals = await TrainerGoal.find(query);
+
+  if (goals) {
     res.status(200).json({
-      goals: body,
+      goals: goals,
     });
   } else {
     res.status(404);
@@ -104,25 +135,50 @@ const getAllTrainerGoals = asyncHandler(async (req, res) => {
 //   }
 // });
 
-// @desc    Delete body
+// @desc    Get trainer goals by trainer ID (public - for viewing trainer profiles)
+// @route   GET /api/trainers/trainerGoals/trainer/:trainerId
+const getTrainerGoalsByTrainerId = asyncHandler(async (req, res) => {
+  const trainerId = req.params.trainerId;
+
+  let query = { trainerId: trainerId };
+
+  // Optionally filter by language
+  if (req.query.language && req.query.language.length > 0) {
+    query.language = req.query.language;
+  }
+
+  const goals = await TrainerGoal.find(query);
+
+  res.status(200).json({
+    goals: goals || [],
+  });
+});
+
+// @desc    Delete trainer goal (only if owned by current user)
 // @route   Delete /api/trainers/trainerGoals/:goalId
 const deleteTrainerGoal = asyncHandler(async (req, res) => {
-  const body = await TrainerGoal.findById(req.params.goalId);
-  console.log(req.params.goalId);
-  if (body) {
-    await body.remove();
-    res.json({ message: "Trainer Goal removed" });
-  } else {
+  const trainerId = req.user._id;
+  const goal = await TrainerGoal.findById(req.params.goalId);
+
+  if (!goal) {
     res.status(404);
     throw new Error("Trainer Goal not found");
   }
+
+  // Check if the goal belongs to the current user
+  if (goal.trainerId.toString() !== trainerId.toString()) {
+    res.status(403);
+    throw new Error("Not authorized to delete this goal");
+  }
+
+  await goal.remove();
+  res.json({ message: "Trainer Goal removed" });
 });
 
 module.exports = {
   createTrainerGoal,
-  //   getBodyById,
   getAllTrainerGoals,
-  //   updateBody,
+  getTrainerGoalsByTrainerId,
   deleteTrainerGoal,
   updateTrainerGoal,
 };

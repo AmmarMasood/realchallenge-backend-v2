@@ -13,6 +13,11 @@ const trainerGoalSchema = mongoose.Schema(
       type: String,
       enum: SUPPORTED_LANGUAGES,
     },
+    trainerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
   },
   { timestamps: true }
 );
