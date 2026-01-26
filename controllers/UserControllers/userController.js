@@ -929,6 +929,109 @@ const destroy = asyncHandler(async (req, res, next) => {
   }
 });
 
+// @desc    Admin reset user password (sends reset email to user)
+// @route   PUT /api/users/:userId/admin-reset-password
+// @access  Private/Admin
+const adminResetPassword = asyncHandler(async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Generate reset token
+    const token = crypto.randomBytes(32).toString("hex");
+    user.resetToken = token;
+    // 2 hours expire time
+    user.resetTokenExpire = Date.now() + 7200000;
+
+    await user.save();
+
+    const passwordResetLink = `${process.env.FRONTEND_ADD}/reset-password/${token}`;
+
+    // Console log for debugging
+    console.log("=============================================");
+    console.log("ADMIN TRIGGERED PASSWORD RESET LINK:");
+    console.log(passwordResetLink);
+    console.log("User Email:", user.email);
+    console.log("Token expires in 2 hours");
+    console.log("=============================================");
+
+    const mailOptions = {
+      from: "no-reply@realchallenge.fit",
+      to: user.email,
+      subject: "Password Reset",
+      html: `
+        <h1>Real Challenge Fit</h1>
+        <h2>Password Reset</h2>
+        <p>An administrator has requested a password reset for your account.</p>
+        <h5>Please click on this <a href="${passwordResetLink}">link to reset your password</a></h5>
+        <p>This link will expire after 2 hours.</p>
+      `,
+    };
+
+    try {
+      await sendEmail(user.email, "Password Reset", mailOptions.html);
+      res.status(200).json({
+        message: "Password reset email sent",
+        email: user.email,
+        resetLink: passwordResetLink,
+      });
+    } catch (error) {
+      console.log("Error sending email", error);
+      // Even if email fails, return the link so admin can share it manually
+      res.status(200).json({
+        message: "Email sending failed, but here is the reset link",
+        email: user.email,
+        resetLink: passwordResetLink,
+        emailFailed: true,
+      });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// @desc    Admin activate user account
+// @route   PUT /api/users/:userId/admin-activate
+// @access  Private/Admin
+const adminActivateUser = asyncHandler(async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.isActive) {
+      return res.status(400).json({ message: "User is already activated" });
+    }
+
+    // Activate the user
+    user.isActive = true;
+    // Clear verification tokens
+    user.resetToken = undefined;
+    user.resetTokenExpire = undefined;
+
+    await user.save();
+
+    res.status(200).json({
+      message: "User activated successfully",
+      user: {
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        isActive: user.isActive,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // @desc    Update user roles (admin only)
 // @route   PUT /api/users/:userId/roles
 // @access  Private/Admin
@@ -999,6 +1102,8 @@ module.exports = {
   getAllUsers,
   updateUserProfile,
   updateUserRoles,
+  adminResetPassword,
+  adminActivateUser,
   deleteUser,
   allowIfLoggedin,
   grantAccess,

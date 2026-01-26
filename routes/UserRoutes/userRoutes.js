@@ -10,6 +10,8 @@ const {
   getAllUsers,
   updateUserProfile,
   updateUserRoles,
+  adminResetPassword,
+  adminActivateUser,
   deleteUser,
   getUserById,
   allowIfLoggedin,
@@ -60,6 +62,12 @@ router
 
 // Update user roles (admin only)
 router.put("/:userId/roles", protect, admin, updateUserRoles);
+
+// Admin reset user password (sends reset email to user)
+router.put("/:userId/admin-reset-password", protect, admin, adminResetPassword);
+
+// Admin activate user account
+router.put("/:userId/admin-activate", protect, admin, adminActivateUser);
 
 router.route("/destroyUsers").get(destroy);
 
