@@ -69,7 +69,7 @@ router.put(
 );
 
 router.get("/points/get-points", protect, getUserPoints);
-router.get("/points/use-points", protect, availUserPoints);
+router.post("/points/redeem", protect, availUserPoints);
 router.get("/track-challenge/:challengeId", protect, getChallengeProgress);
 router.post("/replace-free-challenge", protect, replaceFreeChallenge);
 router.post("/add-free-challenge", protect, addFreeChallenge);

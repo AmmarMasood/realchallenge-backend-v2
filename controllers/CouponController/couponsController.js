@@ -165,26 +165,42 @@ const useCoupon = asyncHandler(async (req, res) => {
   );
   console.log(coupon);
 
-  if (
-    coupon &&
-    coupon.couponUsers &&
-    coupon.limitUsage > coupon.couponUsers.length &&
-    coupon.couponUsers.filter((user) => req.user._id).length <= 0
-  ) {
-    (coupon.couponUsers = [...coupon.couponUsers, req.user.id]),
-      console.log("updatedCoupon", coupon);
-    const response = await Coupons.findByIdAndUpdate(coupon._id, coupon, {
-      useFindAndModify: false,
-    });
-    console.log("response", response);
-    res.status(200).json({
-      coupon: coupon,
-      message: "Coupons used successfully",
-    });
-  } else {
+  if (!coupon || !coupon.couponUsers) {
     res.status(404);
-    throw new Error("Coupons Not Valid");
+    throw new Error("Coupon Not Found");
   }
+
+  // Check if coupon has reached usage limit
+  if (coupon.limitUsage <= coupon.couponUsers.length) {
+    res.status(400);
+    throw new Error("Coupon usage limit reached");
+  }
+
+  // Check if user has already used this coupon
+  const alreadyUsed = coupon.couponUsers.some(
+    (user) => user._id.toString() === req.user._id.toString()
+  );
+  if (alreadyUsed) {
+    res.status(400);
+    throw new Error("You have already used this coupon");
+  }
+
+  // Update coupon: add user to couponUsers and increment currentUsage
+  const updatedCoupon = await Coupons.findByIdAndUpdate(
+    coupon._id,
+    {
+      $push: { couponUsers: req.user._id },
+      $inc: { currentUsage: 1 },
+    },
+    { new: true, useFindAndModify: false }
+  );
+
+  console.log("updatedCoupon", updatedCoupon);
+
+  res.status(200).json({
+    coupon: updatedCoupon,
+    message: "Coupon used successfully",
+  });
 });
 
 module.exports = {

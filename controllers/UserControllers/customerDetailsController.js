@@ -818,7 +818,7 @@ const updateChallengeProgress = asyncHandler(async (req, res, next) => {
           };
           await User.findByIdAndUpdate(
             req.params.customerId,
-            { points: user.points + challengeInformation.points },
+            { $inc: { points: challengeInformation.points } },
             {
               useFindAndModify: false,
             }
@@ -849,7 +849,7 @@ const updateChallengeProgress = asyncHandler(async (req, res, next) => {
           };
           await User.findByIdAndUpdate(
             req.params.customerId,
-            { points: user.points + challengeInformation.points },
+            { $inc: { points: challengeInformation.points } },
             {
               useFindAndModify: false,
             }
@@ -1048,16 +1048,41 @@ const getUserPoints = asyncHandler(async (req, res, next) => {
 
 const availUserPoints = asyncHandler(async (req, res, next) => {
   try {
-    const user = await User.findByIdAndUpdate(
+    const user = await User.findById(req.user._id);
+    const pointsToRedeem = req.body.pointsToRedeem || user.points;
+
+    // Validate minimum points
+    if (pointsToRedeem < 100) {
+      return res.status(400).json({
+        success: false,
+        message: "Minimum 100 points required to redeem",
+      });
+    }
+
+    // Validate user has enough points
+    if (user.points < pointsToRedeem) {
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient points balance",
+      });
+    }
+
+    // Calculate discount (100 points = 1 EUR/USD)
+    const discount = pointsToRedeem / 100;
+    const remainingPoints = user.points - pointsToRedeem;
+
+    // Update user points atomically
+    await User.findByIdAndUpdate(
       req.user._id,
-      { points: 0 },
-      {
-        useFindAndModify: false,
-      }
+      { $inc: { points: -pointsToRedeem } },
+      { useFindAndModify: false }
     );
-    console.log(user);
+
     return res.status(200).json({
-      points: 0,
+      success: true,
+      pointsRedeemed: pointsToRedeem,
+      discount: discount,
+      remainingPoints: remainingPoints,
     });
   } catch (err) {
     next(err);
