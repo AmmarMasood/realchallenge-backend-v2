@@ -175,9 +175,27 @@ const deleteTrainerGoal = asyncHandler(async (req, res) => {
   res.json({ message: "Trainer Goal removed" });
 });
 
+// @desc    Get all trainer goals in the database (public)
+// @route   GET /api/trainers/trainerGoals/public/all
+const getAllTrainerGoalsPublic = asyncHandler(async (req, res) => {
+  let query = {};
+
+  // Optionally filter by language
+  if (req.query.language && req.query.language.length > 0) {
+    query.language = req.query.language;
+  }
+
+  const goals = await TrainerGoal.find(query);
+
+  res.status(200).json({
+    goals: goals || [],
+  });
+});
+
 module.exports = {
   createTrainerGoal,
   getAllTrainerGoals,
+  getAllTrainerGoalsPublic,
   getTrainerGoalsByTrainerId,
   deleteTrainerGoal,
   updateTrainerGoal,

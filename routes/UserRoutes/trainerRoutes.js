@@ -1,6 +1,7 @@
 const express = require("express");
 const {
   getAllTrainerGoals,
+  getAllTrainerGoalsPublic,
   getTrainerGoalsByTrainerId,
   createTrainerGoal,
   deleteTrainerGoal,
@@ -29,6 +30,9 @@ router.get("/:trainerId", getTrainerById);
 router.put("/:trainerId", protect, updateTrainerById);
 
 router.post("/:trainerId/comments", protect, createtrainerComment);
+
+// Public route - get all trainer goals in database
+router.get("/trainerGoals/public/all", getAllTrainerGoalsPublic);
 
 // Trainer Goals routes - protected (for managing own goals)
 router.get("/trainerGoals/all", protect, getAllTrainerGoals);

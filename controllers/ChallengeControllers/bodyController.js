@@ -53,7 +53,7 @@ const getBodyById = asyncHandler(async (req, res) => {
 // @route   GET /api/body/
 const getAllBody = asyncHandler(async (req, res) => {
   let body;
-  if (req.query.language && req.query.language > 0) {
+  if (req.query.language && req.query.language.length > 0) {
     body = await Body.find({ language: req.query.language });
   } else {
     body = await Body.find({});
