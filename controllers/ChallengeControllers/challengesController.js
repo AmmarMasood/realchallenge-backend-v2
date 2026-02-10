@@ -484,9 +484,26 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
       }
     }
     const challenge = await Challenges.findById(req.params.challengeId);
+    if (!challenge) {
+      res.status(404);
+      throw new Error("Challenge not found");
+    }
+
+    // Authorization check: only admin, creator, or assigned trainer can update
+    const isAdmin = hasRole(req.user, "admin");
+    const isCreator = challenge.user && challenge.user.toString() === req.user.id;
+    const isAssignedTrainer = challenge.trainers.some(
+      (t) => t.toString() === req.user.id
+    );
+
+    if (!isAdmin && !isCreator && !isAssignedTrainer) {
+      return res.status(403).json({
+        message: "Not authorized to update this challenge",
+      });
+    }
+
     let update;
-    if (challenge) {
-      update = {
+    update = {
         challengeName: req.body.challengeName
           ? req.body.challengeName
           : challenge.challengeName,
@@ -513,9 +530,10 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
         results: req.body.results ? req.body.results : challenge.results,
         allowComments: req.body.allowComments,
         allowReviews: req.body.allowReviews,
-        isPublic: hasRole(req.user, "admin") ? req.body.isPublic : false,
-        adminApproved:
-          hasRole(req.user, "admin") ? req.body.adminApproved : false,
+        isPublic: isAdmin ? req.body.isPublic : false,
+        adminApproved: isAdmin
+          ? (req.body.adminApproved !== undefined ? req.body.adminApproved : challenge.adminApproved)
+          : false,
         weeks: req.body.weeks ? req.body.weeks : challenge.weeks,
         body: req.body.body ? req.body.body : challenge.body,
         tags: req.body.tags ? req.body.tags : challenge.tags,
@@ -564,10 +582,6 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
         data: updatedChallenge,
         message: "Challenge updated",
       });
-    } else {
-      res.status(404);
-      throw new Error("Challenge not found");
-    }
   } catch (error) {
     next(error);
   }
