@@ -33,7 +33,7 @@ const authorizeApp = async (req, res) => {
   const client = new AuthorizationCode(config);
 
   const authorizationUri = client.authorizeURL({
-    redirect_uri: "https://real-challenge-fit.herokuapp.com/",
+    redirect_uri: process.env.REDIRECT_URL,
     scope: "payments.read customers.write customers.read",
     state:
       "$2a$10$qVjB1QgQ8G2Q8VcpdcG.eee7DRObvhpxd1V6SGiXcG.eee7DRObvhpxd1V6SGiXUEHbCihziJEMa",
@@ -154,7 +154,7 @@ const createPayment = async (
   value,
   description,
   redirectUrl,
-  custId
+  custId,
 ) => {
   try {
     const payment = await mollieClient.payments.create({
@@ -208,7 +208,7 @@ const createFirstPayment = async (req, res) => {
             {
               useFindAndModify: false,
               new: true,
-            }
+            },
           );
           if (updatedUser) {
             console.log("Update User", updatedUser);
@@ -217,7 +217,7 @@ const createFirstPayment = async (req, res) => {
               value,
               description,
               redirectUrl,
-              mollieId
+              mollieId,
             );
           }
         } else {
@@ -283,7 +283,9 @@ const createSubscription = async (req, res) => {
       user.customerDetails = newCustomerDetails._id;
       await user.save();
       // Re-fetch user with populated customerDetails
-      const updatedUser = await User.findById(req.body.id).populate("customerDetails");
+      const updatedUser = await User.findById(req.body.id).populate(
+        "customerDetails",
+      );
       user.customerDetails = updatedUser.customerDetails;
     }
 
@@ -310,7 +312,7 @@ const createSubscription = async (req, res) => {
             {
               useFindAndModify: false,
               new: true,
-            }
+            },
           );
           // const updatedCustDetails = new
 
@@ -328,12 +330,12 @@ const createSubscription = async (req, res) => {
 
             const updatedCustomerDetails =
               await CustomerDetails.findByIdAndUpdate(
-                updatedUser.customerDetails,  // customerDetails is already the ObjectId
+                updatedUser.customerDetails, // customerDetails is already the ObjectId
                 { membership: newMembership },
                 {
                   useFindAndModify: false,
                   new: true,
-                }
+                },
               );
             // let customerDetails = new CustomerDetails({
             //   membership: newMembership,
@@ -400,7 +402,7 @@ const updateChallengeOnSubscription = async (req, res) => {
           : [];
         // check if challenge already exist
         const challengeFound = subscribedChallenges.find(
-          (challenge) => challengeId.toString() === challenge.toString()
+          (challenge) => challengeId.toString() === challenge.toString(),
         );
         console.log("Challnege Found", challengeFound);
         if (!challengeFound) {
@@ -414,7 +416,7 @@ const updateChallengeOnSubscription = async (req, res) => {
           {
             useFindAndModify: false,
             new: true,
-          }
+          },
         );
 
         // Notify user about challenge access (for free challenges)
@@ -431,7 +433,7 @@ const updateChallengeOnSubscription = async (req, res) => {
             : [];
 
           const challengeFound = subscribedChallenges.find(
-            (challenge) => challengeId.toString() === challenge.toString()
+            (challenge) => challengeId.toString() === challenge.toString(),
           );
           if (!challengeFound) {
             console.log("here");
@@ -444,7 +446,7 @@ const updateChallengeOnSubscription = async (req, res) => {
               {
                 useFindAndModify: false,
                 new: true,
-              }
+              },
             );
 
           // Notify user about challenge access (for subscribed users)

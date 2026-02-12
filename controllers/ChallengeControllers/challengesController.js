@@ -100,6 +100,22 @@ const createChallenge = asyncHandler(async (req, res, next) => {
     const translationKey = req.body.translationKey ||
       generateTranslationKey("challenge", req.body.challengeName);
 
+    // Prevent duplicate linking: no two challenges of the same language should share a translationKey
+    if (req.body.translationKey) {
+      const existing = await Challenges.findOne({
+        translationKey: req.body.translationKey,
+        language: req.body.language,
+      });
+      if (existing) {
+        return res.status(409).json({
+          error: "DUPLICATE_TRANSLATION_LINK",
+          message: `Another ${req.body.language} challenge is already linked with this translation key.`,
+          existingChallengeId: existing._id,
+          existingChallengeName: existing.challengeName,
+        });
+      }
+    }
+
     let newChallenge = new Challenges({
       user: req.user.id,
       translationKey,
@@ -502,6 +518,23 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
       });
     }
 
+    // Prevent duplicate linking: no two challenges of the same language should share a translationKey
+    if (req.body.translationKey) {
+      const existing = await Challenges.findOne({
+        translationKey: req.body.translationKey,
+        language: challenge.language,
+        _id: { $ne: challenge._id },
+      });
+      if (existing) {
+        return res.status(409).json({
+          error: "DUPLICATE_TRANSLATION_LINK",
+          message: `Another ${challenge.language} challenge is already linked with this translation key.`,
+          existingChallengeId: existing._id,
+          existingChallengeName: existing.challengeName,
+        });
+      }
+    }
+
     let update;
     update = {
         challengeName: req.body.challengeName
@@ -545,6 +578,9 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
           : challenge.challengeGoals,
         trainers: req.body.trainers ? req.body.trainers : challenge.trainers,
         music: musicsResolved,
+        translationKey: req.body.translationKey !== undefined
+          ? req.body.translationKey
+          : challenge.translationKey,
       };
       await Challenges.findByIdAndUpdate(challenge._id, update, {
         useFindAndModify: false,
