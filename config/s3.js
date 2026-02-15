@@ -143,7 +143,11 @@ async function invalidateCloudFrontCache(paths) {
       CallerReference: `invalidation-${Date.now()}`,
       Paths: {
         Quantity: paths.length,
-        Items: paths.map((path) => (path.startsWith("/") ? path : `/${path}`)),
+        Items: paths.map((p) => {
+          const withSlash = p.startsWith("/") ? p : `/${p}`;
+          // URL-encode each path segment (but keep slashes and leading /)
+          return "/" + withSlash.split("/").filter(Boolean).map((seg) => encodeURIComponent(seg)).join("/");
+        }),
       },
     },
   };

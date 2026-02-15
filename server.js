@@ -119,4 +119,19 @@ app.listen(PORT, () => {
   console.log(
     `Server is running in ${process.env.NODE_ENV} mode on port ${PORT}`
   );
+
+  // MediaConvert polling — check job status every 30 seconds
+  const {
+    pollAndProcessJobs,
+    cleanupStaleProcessing,
+  } = require("./services/mediaConvertService");
+
+  setInterval(() => {
+    pollAndProcessJobs();
+  }, 30 * 1000);
+
+  // Stale processing cleanup — mark processing files older than 1 hour as failed
+  setInterval(() => {
+    cleanupStaleProcessing(60 * 60 * 1000);
+  }, 5 * 60 * 1000); // Check every 5 minutes
 });

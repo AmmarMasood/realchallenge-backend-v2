@@ -10,6 +10,7 @@ const fs = require("fs");
 const path = require("path");
 const ThumbnailService = require("../../services/thumbnailService");
 const VideoOptimizationService = require("../../services/videoOptimizationService");
+const mediaConvertService = require("../../services/mediaConvertService");
 const {
   sendProgressUpdate,
   sendUploadComplete,
@@ -464,6 +465,29 @@ const uploadMediaFile = asyncHandler(async (req, res, next) => {
   });
 
   res.status(201).json({ mediaFile, message: "File uploaded successfully" });
+
+  // Fire-and-forget: start MediaConvert optimization for video files
+  if (ThumbnailService.isVideoFile(file.mimetype)) {
+    const s3Key = `${folderId}/${finalFile.filename}`;
+    (async () => {
+      try {
+        const jobId = await mediaConvertService.createTranscodeJob(
+          s3Key,
+          folderId,
+          mediaFile._id.toString()
+        );
+        mediaFile.processingStatus = "processing";
+        mediaFile.mediaConvertJobId = jobId;
+        mediaFile.originalSize = finalFile.size;
+        await mediaFile.save();
+        console.log(`[MediaConvert] Started job ${jobId} for ${file.originalname}`);
+      } catch (err) {
+        console.error("[MediaConvert] Failed to create job:", err.message);
+        mediaFile.processingStatus = "failed";
+        await mediaFile.save();
+      }
+    })();
+  }
 });
 
 // @desc    Upload file to folder with progress tracking
@@ -721,6 +745,29 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
     });
 
     res.status(201).json({ mediaFile, message: "File uploaded successfully" });
+
+    // Fire-and-forget: start MediaConvert optimization for video files
+    if (ThumbnailService.isVideoFile(file.mimetype)) {
+      const s3KeyForMC = `${folderId}/${finalFile.filename}`;
+      (async () => {
+        try {
+          const jobId = await mediaConvertService.createTranscodeJob(
+            s3KeyForMC,
+            folderId,
+            mediaFile._id.toString()
+          );
+          mediaFile.processingStatus = "processing";
+          mediaFile.mediaConvertJobId = jobId;
+          mediaFile.originalSize = finalFile.size;
+          await mediaFile.save();
+          console.log(`[MediaConvert] Started job ${jobId} for ${file.originalname}`);
+        } catch (err) {
+          console.error("[MediaConvert] Failed to create job:", err.message);
+          mediaFile.processingStatus = "failed";
+          await mediaFile.save();
+        }
+      })();
+    }
   } catch (error) {
     console.error("Upload error:", error);
     sendUploadError(user._id, uploadId, error);

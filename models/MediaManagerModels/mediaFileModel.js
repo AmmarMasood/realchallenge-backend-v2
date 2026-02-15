@@ -36,6 +36,19 @@ const mediaFileSchema = mongoose.Schema({
     type: String,
     required: false,
   },
+  processingStatus: {
+    type: String,
+    enum: ["none", "processing", "completed", "failed"],
+    default: "none",
+  },
+  mediaConvertJobId: {
+    type: String,
+    default: null,
+  },
+  originalSize: {
+    type: Number,
+    default: null,
+  },
   createdAt: {
     type: Date,
     default: Date.now,
