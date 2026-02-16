@@ -27,7 +27,7 @@ class ThumbnailService {
             timestamps: ['3'],
             filename: thumbnailFilename,
             folder: path.join(__dirname, '../uploads'),
-            size: '320x240'
+            size: '320x?'
           })
           .on('end', async () => {
             try {

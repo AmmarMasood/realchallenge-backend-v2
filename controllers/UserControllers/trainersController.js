@@ -84,7 +84,7 @@ const getTrainerById = asyncHandler(async (req, res) => {
     .populate("trainerGoals");
 
   if (user) {
-    if (user.role == "trainer") {
+    if (user.role === "trainer" || user.role === "admin") {
       const challenges = await Challenges.find({
         trainers: req.params.trainerId,
       }).select(
