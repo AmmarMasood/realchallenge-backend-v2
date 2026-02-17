@@ -24,6 +24,9 @@ const {
   compareS3vsCloudFront,
   searchMediaFiles, // New search function for admin
   searchMyMediaFiles, // New search function for regular users
+  presignUpload,
+  confirmUpload,
+  thumbnailCallback,
 } = require("../../controllers/MediaControllers/mediaController");
 
 const {
@@ -86,6 +89,11 @@ router.get("/search/my-files", protect, searchMyMediaFiles);
 
 // Search media files (admin only)
 router.get("/search", protect, admin, searchMediaFiles);
+
+// --- DIRECT-TO-S3 UPLOAD ROUTES ---
+router.post("/presign", protect, presignUpload);
+router.post("/confirm-upload", protect, confirmUpload);
+router.post("/thumbnail-callback", thumbnailCallback); // shared secret auth, no protect
 
 // Multer error handling middleware
 const handleMulterError = (err, req, res, next) => {

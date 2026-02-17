@@ -218,6 +218,27 @@ function deleteThumbnailFile(folderId, thumbnailFileName) {
   return s3.deleteObject(deleteParams).promise();
 }
 
+// Generate a pre-signed PUT URL for direct browser-to-S3 uploads
+function getPresignedPutUrl(s3Key, contentType, expiresIn = 900) {
+  const params = {
+    Bucket: bucketName,
+    Key: s3Key,
+    ContentType: contentType,
+    Expires: expiresIn,
+  };
+  return s3.getSignedUrlPromise("putObject", params);
+}
+
+// Verify a file exists in S3 and return its metadata
+function headObject(s3Key) {
+  return s3
+    .headObject({
+      Bucket: bucketName,
+      Key: s3Key,
+    })
+    .promise();
+}
+
 module.exports = {
   deleteFolderFromS3,
   deleteFile,
@@ -226,4 +247,6 @@ module.exports = {
   getCloudFrontUrl,
   invalidateCloudFrontCache,
   prewarmCache,
+  getPresignedPutUrl,
+  headObject,
 };

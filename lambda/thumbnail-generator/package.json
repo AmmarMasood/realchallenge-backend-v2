@@ -1,0 +1,9 @@
+{
+  "name": "realchallenge-thumbnail-generator",
+  "version": "1.0.0",
+  "description": "Lambda function to generate video thumbnails using S3 range requests and FFmpeg",
+  "main": "index.js",
+  "dependencies": {
+    "aws-sdk": "^2.1500.0"
+  }
+}

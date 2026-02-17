@@ -5,6 +5,8 @@ const {
   deleteFolderFromS3,
   deleteThumbnailFile,
   getCloudFrontUrl,
+  getPresignedPutUrl,
+  headObject,
 } = require("../../config/s3");
 const fs = require("fs");
 const path = require("path");
@@ -18,6 +20,7 @@ const {
 } = require("./progressController");
 const { hasRole } = require("../../middlewares/authMiddleware");
 
+const { v4: uuidv4 } = require("uuid");
 const MediaFiles = require("../../models/MediaManagerModels/mediaFileModel");
 const MediaFolder = require("../../models/MediaManagerModels/mediaFolderModel");
 const { User } = require("../../models/UserModels/userModel"); // Assuming you have a User model
@@ -1377,6 +1380,220 @@ const searchMyMediaFiles = asyncHandler(async (req, res, next) => {
   }
 });
 
+// Maximum file size for direct-to-S3 uploads: 2GB
+const MAX_DIRECT_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024;
+
+// @desc    Get a pre-signed PUT URL for direct-to-S3 upload
+// @route   POST /api/media/presign
+// @access  private
+const presignUpload = asyncHandler(async (req, res) => {
+  const { folderId, filename, fileSize, mimeType } = req.body;
+  const user = req.user;
+  const isAdmin = hasRole(user, "admin");
+
+  if (!folderId || !filename || !fileSize || !mimeType) {
+    return res
+      .status(400)
+      .json({ message: "folderId, filename, fileSize, and mimeType are required" });
+  }
+
+  // Validate file size
+  if (fileSize > MAX_DIRECT_UPLOAD_SIZE) {
+    return res.status(400).json({
+      message: `File size exceeds the maximum limit of ${Math.round(
+        MAX_DIRECT_UPLOAD_SIZE / (1024 * 1024 * 1024)
+      )}GB`,
+    });
+  }
+
+  // Validate folder exists
+  const folder = await MediaFolder.findById(folderId);
+  if (!folder) {
+    return res.status(404).json({ message: "Folder not found" });
+  }
+
+  // Check access
+  if (!isAdmin && folder.user.toString() !== user._id.toString()) {
+    return res.status(403).json({ message: "Access denied to folder" });
+  }
+
+  // Validate file type matches folder type
+  const allowedMimeTypes = {
+    picture: ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"],
+    video: ["video/mp4", "video/webm", "video/ogg", "video/quicktime"],
+    audio: ["audio/mpeg", "audio/mp3", "audio/wav", "audio/ogg", "audio/webm"],
+    document: [
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "text/plain",
+    ],
+  };
+
+  if (
+    folder.mediaType !== "other" &&
+    allowedMimeTypes[folder.mediaType] &&
+    !allowedMimeTypes[folder.mediaType].includes(mimeType)
+  ) {
+    return res.status(400).json({
+      message: `File type "${mimeType}" is not allowed in ${folder.mediaType} folders`,
+    });
+  }
+
+  // Check for duplicate filename
+  const existingFile = await MediaFiles.findOne({
+    folderId,
+    originalName: filename,
+  });
+  if (existingFile) {
+    return res
+      .status(400)
+      .json({ message: "A file with this name already exists in this folder" });
+  }
+
+  // Generate S3 key
+  const uniqueFilename = `${uuidv4()}_${filename}`;
+  const s3Key = `${folderId}/${uniqueFilename}`;
+
+  // Generate pre-signed URL (15 min expiry)
+  const presignedUrl = await getPresignedPutUrl(s3Key, mimeType, 900);
+
+  res.status(200).json({
+    presignedUrl,
+    s3Key,
+    filename: uniqueFilename,
+    originalName: filename,
+    contentType: mimeType,
+    expiresIn: 900,
+  });
+});
+
+// @desc    Confirm a direct-to-S3 upload completed, create DB record + trigger processing
+// @route   POST /api/media/confirm-upload
+// @access  private
+const confirmUpload = asyncHandler(async (req, res) => {
+  const { folderId, s3Key, filename, originalName, mimeType, fileSize } = req.body;
+  const user = req.user;
+  const isAdmin = hasRole(user, "admin");
+
+  if (!folderId || !s3Key || !filename || !originalName || !mimeType || !fileSize) {
+    return res.status(400).json({
+      message: "folderId, s3Key, filename, originalName, mimeType, and fileSize are required",
+    });
+  }
+
+  // Validate folder
+  const folder = await MediaFolder.findById(folderId);
+  if (!folder) {
+    return res.status(404).json({ message: "Folder not found" });
+  }
+
+  if (!isAdmin && folder.user.toString() !== user._id.toString()) {
+    return res.status(403).json({ message: "Access denied to folder" });
+  }
+
+  // Verify file exists in S3
+  try {
+    await headObject(s3Key);
+  } catch (err) {
+    return res.status(400).json({
+      message: "File not found in S3. Upload may have failed or the pre-signed URL expired.",
+    });
+  }
+
+  // Create CloudFront URL
+  const cloudFrontUrl = getCloudFrontUrl(s3Key);
+
+  // Create DB record
+  const mediaFile = await MediaFiles.create({
+    user: folder.user,
+    folderId,
+    filename,
+    originalName,
+    filelink: cloudFrontUrl,
+    mediaType: folder.mediaType,
+    size: fileSize,
+    thumbnailUrl: null,
+  });
+
+  res.status(201).json({ mediaFile, message: "Upload confirmed successfully" });
+
+  // Fire-and-forget: trigger MediaConvert for videos
+  const isVideo = mimeType.startsWith("video/");
+  if (isVideo) {
+    (async () => {
+      try {
+        const jobId = await mediaConvertService.createTranscodeJob(
+          s3Key,
+          folderId,
+          mediaFile._id.toString()
+        );
+        mediaFile.processingStatus = "processing";
+        mediaFile.mediaConvertJobId = jobId;
+        mediaFile.originalSize = fileSize;
+        await mediaFile.save();
+        console.log(
+          `[MediaConvert] Started job ${jobId} for ${originalName}`
+        );
+      } catch (err) {
+        console.error("[MediaConvert] Failed to create job:", err.message);
+        mediaFile.processingStatus = "failed";
+        await mediaFile.save();
+      }
+    })();
+
+    // Fire-and-forget: trigger thumbnail Lambda
+    (async () => {
+      try {
+        const thumbnailLambdaService = require("../../services/thumbnailLambdaService");
+        await thumbnailLambdaService.invokeThumbnailLambda({
+          s3Key,
+          folderId,
+          fileId: mediaFile._id.toString(),
+          filename,
+        });
+        console.log(`[ThumbnailLambda] Invoked for ${originalName}`);
+      } catch (err) {
+        console.error("[ThumbnailLambda] Failed to invoke:", err.message);
+      }
+    })();
+  }
+});
+
+// @desc    Callback from thumbnail Lambda — updates thumbnailUrl in DB
+// @route   POST /api/media/thumbnail-callback
+// @access  shared secret (no protect middleware)
+const thumbnailCallback = asyncHandler(async (req, res) => {
+  const { secret, fileId, thumbnailS3Key, success, error } = req.body;
+
+  // Validate shared secret
+  const expectedSecret = process.env.THUMBNAIL_CALLBACK_SECRET;
+  if (!expectedSecret || secret !== expectedSecret) {
+    return res.status(403).json({ message: "Invalid callback secret" });
+  }
+
+  if (!fileId) {
+    return res.status(400).json({ message: "fileId is required" });
+  }
+
+  const mediaFile = await MediaFiles.findById(fileId);
+  if (!mediaFile) {
+    return res.status(404).json({ message: "Media file not found" });
+  }
+
+  if (success && thumbnailS3Key) {
+    mediaFile.thumbnailUrl = getCloudFrontUrl(thumbnailS3Key);
+    await mediaFile.save();
+    console.log(`[ThumbnailCallback] Updated thumbnail for file ${fileId}`);
+    return res.status(200).json({ message: "Thumbnail updated" });
+  }
+
+  console.error(`[ThumbnailCallback] Failed for file ${fileId}:`, error);
+  res.status(200).json({ message: "Callback received (thumbnail failed)" });
+});
+
 module.exports = {
   testMediaRoute,
   createMediaFolder,
@@ -1397,4 +1614,7 @@ module.exports = {
   debugCloudFrontPerformance,
   searchMediaFiles, // New search function for admin
   searchMyMediaFiles, // New search function for regular users
+  presignUpload,
+  confirmUpload,
+  thumbnailCallback,
 };
