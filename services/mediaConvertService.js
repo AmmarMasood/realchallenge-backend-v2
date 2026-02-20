@@ -44,7 +44,7 @@ async function createTranscodeJob(s3InputKey, folderId, fileId) {
 
   const inputS3Uri = `s3://${bucketName}/${s3InputKey}`;
   // MediaConvert appends the filename; we use a temp prefix to avoid overwriting the original
-  const outputS3Prefix = `s3://${bucketName}/${folderId}/mc_`;
+  const outputS3Prefix = `s3://${bucketName}/${folderId}/mc_${fileId}_`;
 
   const params = {
     Role: mediaConvertRoleArn,
@@ -200,19 +200,18 @@ async function handleJobComplete(file, job) {
   const folderId = file.folderId.toString();
   const originalKey = `${folderId}/${file.filename}`;
 
-  // Find the output file — MediaConvert creates files under the output prefix
-  // The output key pattern is: {folderId}/mc_{something}.mp4
+  // Find the output file — MediaConvert creates files under a file-specific prefix
+  // The output key pattern is: {folderId}/mc_{fileId}_{something}.mp4
+  const fileId = file._id.toString();
   const listResult = await s3
     .listObjectsV2({
       Bucket: bucketName,
-      Prefix: `${folderId}/mc_`,
+      Prefix: `${folderId}/mc_${fileId}_`,
     })
     .promise();
 
-  // Find the output file that was created around the job's completion time
-  // Filter to only files modified after the file was created
   const outputFiles = (listResult.Contents || []).filter((obj) => {
-    return obj.Key.startsWith(`${folderId}/mc_`) && obj.Key.endsWith(".mp4");
+    return obj.Key.startsWith(`${folderId}/mc_${fileId}_`) && obj.Key.endsWith(".mp4");
   });
 
   if (outputFiles.length === 0) {

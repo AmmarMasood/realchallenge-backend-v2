@@ -41,7 +41,7 @@ exports.handler = async (event) => {
 
   try {
     // Download first 10MB of the video via range request
-    const rangeBytes = 10 * 1024 * 1024; // 10MB
+    const rangeBytes = 25 * 1024 * 1024; // 25MB
     const s3Params = {
       Bucket: bucketName,
       Key: videoS3Key,
@@ -136,6 +136,8 @@ function runFFmpeg(inputPath, outputPath, seekTime) {
       : "ffmpeg";
 
     const args = [
+      "-probesize", "50M",
+      "-analyzeduration", "10M",
       "-ss", seekTime,
       "-i", inputPath,
       "-vframes", "1",
