@@ -149,7 +149,12 @@ async function getJobStatus(jobId) {
  * On completion: copy optimized file over original, delete temp, update DB, invalidate CloudFront.
  * On error: mark as failed in DB.
  */
+let isPolling = false;
+
 async function pollAndProcessJobs() {
+  if (isPolling) return; // Prevent overlapping poll cycles
+  isPolling = true;
+
   try {
     const processingFiles = await MediaFiles.find({
       processingStatus: "processing",
@@ -185,6 +190,8 @@ async function pollAndProcessJobs() {
     }
   } catch (err) {
     console.error("[MediaConvert] Polling error:", err.message);
+  } finally {
+    isPolling = false;
   }
 }
 
@@ -215,6 +222,14 @@ async function handleJobComplete(file, job) {
   });
 
   if (outputFiles.length === 0) {
+    // Re-check DB — another poll cycle may have already handled this file
+    const freshFile = await MediaFiles.findById(file._id);
+    if (freshFile && freshFile.processingStatus === "completed") {
+      console.log(
+        `[MediaConvert] File ${file._id} already completed by another cycle, skipping`
+      );
+      return;
+    }
     console.error(
       `[MediaConvert] No output file found for job ${file.mediaConvertJobId}`
     );

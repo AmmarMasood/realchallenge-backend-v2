@@ -1,18 +1,19 @@
-const AWS = require("aws-sdk");
+const { S3Client, GetObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
 const http = require("http");
 
-const s3 = new AWS.S3();
+const s3 = new S3Client();
 
 /**
  * Lambda handler: generates a thumbnail from a video stored in S3.
  *
- * Downloads only the first 10MB of the video via S3 range request,
- * runs FFmpeg to extract a frame, uploads the thumbnail JPEG back to S3,
- * and calls the backend to update the DB record.
+ * Generates a pre-signed URL for the video and passes it directly to FFmpeg,
+ * which uses HTTP range requests internally to seek and read the file.
+ * This handles videos with moov atom at the end without downloading the whole file.
  *
  * Expected event payload:
  * {
@@ -36,29 +37,22 @@ exports.handler = async (event) => {
 
   console.log(`[ThumbnailGenerator] Processing: ${videoS3Key} for file ${fileId}`);
 
-  const tmpVideoPath = path.join("/tmp", "input_video");
   const tmpThumbnailPath = path.join("/tmp", "thumbnail.jpg");
 
   try {
-    // Download first 10MB of the video via range request
-    const rangeBytes = 25 * 1024 * 1024; // 25MB
-    const s3Params = {
-      Bucket: bucketName,
-      Key: videoS3Key,
-      Range: `bytes=0-${rangeBytes - 1}`,
-    };
+    // Generate a pre-signed URL so FFmpeg can read the video via HTTP
+    // FFmpeg handles range requests internally and can seek to moov atom at end of file
+    const command = new GetObjectCommand({ Bucket: bucketName, Key: videoS3Key });
+    const signedUrl = await getSignedUrl(s3, command, { expiresIn: 300 });
 
-    console.log(`[ThumbnailGenerator] Downloading first ${rangeBytes} bytes...`);
-    const data = await s3.getObject(s3Params).promise();
-    fs.writeFileSync(tmpVideoPath, data.Body);
-    console.log(`[ThumbnailGenerator] Downloaded ${data.Body.length} bytes`);
+    console.log(`[ThumbnailGenerator] Generated signed URL, running FFmpeg...`);
 
     // Try to extract a frame at 3 seconds, fall back to 0 seconds
     let thumbnailGenerated = false;
 
     for (const seekTime of ["3", "0"]) {
       try {
-        await runFFmpeg(tmpVideoPath, tmpThumbnailPath, seekTime);
+        await runFFmpeg(signedUrl, tmpThumbnailPath, seekTime);
         thumbnailGenerated = true;
         console.log(`[ThumbnailGenerator] Frame extracted at ${seekTime}s`);
         break;
@@ -75,8 +69,8 @@ exports.handler = async (event) => {
 
     // Upload thumbnail to S3
     const thumbnailBuffer = fs.readFileSync(tmpThumbnailPath);
-    await s3
-      .putObject({
+    await s3.send(
+      new PutObjectCommand({
         Bucket: bucketName,
         Key: thumbnailS3Key,
         Body: thumbnailBuffer,
@@ -84,7 +78,7 @@ exports.handler = async (event) => {
         CacheControl: "public, max-age=86400",
         ServerSideEncryption: "AES256",
       })
-      .promise();
+    );
 
     console.log(`[ThumbnailGenerator] Uploaded thumbnail to ${thumbnailS3Key}`);
 
@@ -116,19 +110,16 @@ exports.handler = async (event) => {
   } finally {
     // Clean up temp files
     try {
-      if (fs.existsSync(tmpVideoPath)) fs.unlinkSync(tmpVideoPath);
-    } catch (_) {}
-    try {
       if (fs.existsSync(tmpThumbnailPath)) fs.unlinkSync(tmpThumbnailPath);
     } catch (_) {}
   }
 };
 
 /**
- * Run FFmpeg to extract a single frame from the video.
- * Uses the FFmpeg binary available in the Lambda layer.
+ * Run FFmpeg to extract a single frame from a video URL.
+ * FFmpeg reads via HTTP and handles range requests/seeking internally.
  */
-function runFFmpeg(inputPath, outputPath, seekTime) {
+function runFFmpeg(inputUrl, outputPath, seekTime) {
   return new Promise((resolve, reject) => {
     // FFmpeg layer typically puts binary at /opt/bin/ffmpeg
     const ffmpegPath = fs.existsSync("/opt/bin/ffmpeg")
@@ -139,7 +130,7 @@ function runFFmpeg(inputPath, outputPath, seekTime) {
       "-probesize", "50M",
       "-analyzeduration", "10M",
       "-ss", seekTime,
-      "-i", inputPath,
+      "-i", inputUrl,
       "-vframes", "1",
       "-vf", "scale=320:-1",
       "-f", "image2",
@@ -147,7 +138,7 @@ function runFFmpeg(inputPath, outputPath, seekTime) {
       outputPath,
     ];
 
-    execFile(ffmpegPath, args, { timeout: 30000 }, (error, stdout, stderr) => {
+    execFile(ffmpegPath, args, { timeout: 60000 }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(`FFmpeg error: ${error.message}\nStderr: ${stderr}`));
         return;
