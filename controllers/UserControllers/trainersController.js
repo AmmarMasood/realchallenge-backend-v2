@@ -85,11 +85,24 @@ const getTrainerById = asyncHandler(async (req, res) => {
 
   if (user) {
     if (user.role === "trainer" || user.role === "admin") {
-      const challenges = await Challenges.find({
+      const allChallenges = await Challenges.find({
         trainers: req.params.trainerId,
+        isPublic: true,
+        isAdminApproved: true,
       }).select(
-        "challengeName thumbnailLink videoThumbnailLink informationList rating fitnessInterests"
+        "challengeName thumbnailLink videoThumbnailLink informationList rating fitnessInterests intensityGroupId"
       );
+
+      // Deduplicate by intensityGroupId: keep only one representative per group
+      const groupSeen = {};
+      const challenges = allChallenges.filter((c) => {
+        if (c.intensityGroupId) {
+          if (groupSeen[c.intensityGroupId]) return false;
+          groupSeen[c.intensityGroupId] = true;
+        }
+        return true;
+      });
+
       return res.status(201).json({
         message: "Trainer fetched successfully",
         trainer: user,
