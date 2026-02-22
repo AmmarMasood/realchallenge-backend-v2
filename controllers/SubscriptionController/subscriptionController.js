@@ -392,6 +392,15 @@ const updateChallengeOnSubscription = async (req, res) => {
       user = await User.findById(userId).populate("customerDetails");
     }
 
+    // Resolve all challenge IDs to add (includes siblings if intensity group)
+    let challengeIdsToAdd = [challengeId];
+    if (challenge.intensityGroupId) {
+      const siblings = await Challenges.find({
+        intensityGroupId: challenge.intensityGroupId,
+      }).select("_id");
+      challengeIdsToAdd = siblings.map((s) => s._id.toString());
+    }
+
     if (user) {
       if (challenge.user.toString() === userId) {
         return res.status(200).json("Success");
@@ -400,14 +409,16 @@ const updateChallengeOnSubscription = async (req, res) => {
         let subscribedChallenges = user.customerDetails?.challenges
           ? user.customerDetails.challenges
           : [];
-        // check if challenge already exist
-        const challengeFound = subscribedChallenges.find(
-          (challenge) => challengeId.toString() === challenge.toString(),
+        // check if all challenges in group already exist
+        const allAlreadyOwned = challengeIdsToAdd.every((id) =>
+          subscribedChallenges.some((c) => c.toString() === id),
         );
-        console.log("Challnege Found", challengeFound);
-        if (!challengeFound) {
-          console.log("here");
-          subscribedChallenges.push(challengeId);
+        if (!allAlreadyOwned) {
+          for (const id of challengeIdsToAdd) {
+            if (!subscribedChallenges.some((c) => c.toString() === id)) {
+              subscribedChallenges.push(id);
+            }
+          }
         }
 
         const updatedCustomerDetails = await CustomerDetails.findByIdAndUpdate(
@@ -420,7 +431,7 @@ const updateChallengeOnSubscription = async (req, res) => {
         );
 
         // Notify user about challenge access (for free challenges)
-        if (!challengeFound) {
+        if (!allAlreadyOwned) {
           await NotificationService.challengePurchased(challenge, userId);
         }
 
@@ -432,12 +443,15 @@ const updateChallengeOnSubscription = async (req, res) => {
             ? user.customerDetails.challenges
             : [];
 
-          const challengeFound = subscribedChallenges.find(
-            (challenge) => challengeId.toString() === challenge.toString(),
+          const allAlreadyOwned = challengeIdsToAdd.every((id) =>
+            subscribedChallenges.some((c) => c.toString() === id),
           );
-          if (!challengeFound) {
-            console.log("here");
-            subscribedChallenges.push(challengeId);
+          if (!allAlreadyOwned) {
+            for (const id of challengeIdsToAdd) {
+              if (!subscribedChallenges.some((c) => c.toString() === id)) {
+                subscribedChallenges.push(id);
+              }
+            }
           }
           const updatedCustomerDetails =
             await CustomerDetails.findByIdAndUpdate(
@@ -450,7 +464,7 @@ const updateChallengeOnSubscription = async (req, res) => {
             );
 
           // Notify user about challenge access (for subscribed users)
-          if (!challengeFound) {
+          if (!allAlreadyOwned) {
             await NotificationService.challengePurchased(challenge, userId);
           }
 

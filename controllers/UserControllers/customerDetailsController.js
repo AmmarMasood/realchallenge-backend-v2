@@ -947,29 +947,44 @@ const replaceFreeChallenge = asyncHandler(async (req, res, next) => {
       );
       // first we replace the old free challenge with new one.
       if (freeChallenge) {
-        updatedChallenges = customerDetails.challenges.filter(
-          (f) => f._id.toString() !== freeChallenge._id.toString()
-        );
-        updatedChallenges.push(req.body.challenge);
-        //now we remove any track record of the challenge the user might have
-
-        const checkTrackChallengeHasData = customerDetails.trackChallenges.find(
-          (f) => f.challenge.toString() === freeChallenge._id.toString()
-        );
-        if (checkTrackChallengeHasData) {
-          updatedChallengTrack = customerDetails.trackChallenges.filter(
-            (f) =>
-              f.challenge.toString() !==
-              checkTrackChallengeHasData.challenge.toString()
-          );
+        // Determine all IDs to remove (old free challenge + its group siblings)
+        let oldIdsToRemove = [freeChallenge._id.toString()];
+        if (freeChallenge.intensityGroupId) {
+          const oldSiblings = await Challenges.find({
+            intensityGroupId: freeChallenge.intensityGroupId,
+          }).select("_id");
+          oldIdsToRemove = oldSiblings.map((s) => s._id.toString());
         }
-        // console.log("checkTrackChallengeHasData", checkTrackChallengeHasData);
-        // console.log("freeChallenge", freeChallenge);
-        // console.log("updatedChallenges", updatedChallenges);
-        // console.log("updatedChallengTrack", updatedChallengTrack);
+
+        // Remove all old group challenges
+        updatedChallenges = customerDetails.challenges.filter(
+          (f) => !oldIdsToRemove.includes(f._id.toString())
+        );
+
+        // Remove track records for all old group challenges
+        updatedChallengTrack = customerDetails.trackChallenges.filter(
+          (f) => !oldIdsToRemove.includes(f.challenge.toString())
+        );
+
+        // Determine all IDs to add (new challenge + its group siblings)
+        const newChallengeDoc = await Challenges.findById(req.body.challenge._id);
+        let newIdsToAdd = [req.body.challenge._id];
+        if (newChallengeDoc && newChallengeDoc.intensityGroupId) {
+          const newSiblings = await Challenges.find({
+            intensityGroupId: newChallengeDoc.intensityGroupId,
+          }).select("_id");
+          newIdsToAdd = newSiblings.map((s) => s._id.toString());
+        }
+
+        for (const id of newIdsToAdd) {
+          if (!updatedChallenges.some((c) => (c._id || c).toString() === id)) {
+            updatedChallenges.push(id);
+          }
+        }
+
         user.customerDetails.challenges = updatedChallenges;
         user.customerDetails.trackChallenges = updatedChallengTrack;
-        user.customerDetails.save();
+        await user.customerDetails.save();
         return res.status(200).json({
           message: "Challenge replaced!",
         });
@@ -983,14 +998,6 @@ const replaceFreeChallenge = asyncHandler(async (req, res, next) => {
         err: "User already has a challenge",
       });
     }
-    console.log("here 3");
-
-    console.log("challngnkengeka", challenge);
-
-    // return res.status(200).json({
-    //   data: challenge,
-    //   message: "Challenge tracking found",
-    // });
   } catch (err) {
     next(err);
   }
@@ -1010,17 +1017,32 @@ const addFreeChallenge = asyncHandler(async (req, res, next) => {
     });
 
     const customerDetails = user.customerDetails;
-    const checkIfUserAlreadyHasChallenge = customerDetails.challenges.findIndex(
-      (c) => c._id.toString() === req.body.challenge._id
-    );
-    // if user donest already have the challenge
-    if (checkIfUserAlreadyHasChallenge < 0) {
-      let updatedChallenges = [...customerDetails.challenges];
 
-      updatedChallenges.push(req.body.challenge);
+    // Look up the full challenge to check for intensity group
+    const challengeDoc = await Challenges.findById(req.body.challenge._id);
+
+    // Resolve all IDs to add (includes siblings if intensity group)
+    let idsToAdd = [req.body.challenge._id];
+    if (challengeDoc && challengeDoc.intensityGroupId) {
+      const siblings = await Challenges.find({
+        intensityGroupId: challengeDoc.intensityGroupId,
+      }).select("_id");
+      idsToAdd = siblings.map((s) => s._id.toString());
+    }
+
+    // Check if user already owns any challenge from this group
+    const alreadyOwnsGroup = idsToAdd.some((id) =>
+      customerDetails.challenges.some((c) => c._id.toString() === id)
+    );
+
+    if (!alreadyOwnsGroup) {
+      let updatedChallenges = [...customerDetails.challenges];
+      for (const id of idsToAdd) {
+        updatedChallenges.push(id);
+      }
 
       user.customerDetails.challenges = updatedChallenges;
-      user.customerDetails.save();
+      await user.customerDetails.save();
       return res.status(200).json({
         message: "Challenge added!",
       });

@@ -96,6 +96,42 @@ const createChallenge = asyncHandler(async (req, res, next) => {
 
     console.log("Musics", musicsResolved);
 
+    // Auto-generate intensityGroupId when grouping is requested but no groupId provided
+    if (req.body.intensityGroupId === undefined && req.body.multipleIntensities) {
+      req.body.intensityGroupId = "grp_" + require("crypto").randomBytes(4).toString("hex");
+    }
+
+    // Validate intensity grouping: if groupId is set, intensity is required
+    if (req.body.intensityGroupId) {
+      if (!req.body.intensity) {
+        return res.status(400).json({
+          message: "Intensity is required when using intensity grouping",
+          error: "INTENSITY_FIELDS_REQUIRED",
+        });
+      }
+      // Check uniqueness: no two challenges can share intensityGroupId + intensity
+      const duplicateIntensity = await Challenges.findOne({
+        intensityGroupId: req.body.intensityGroupId,
+        intensity: req.body.intensity,
+      });
+      if (duplicateIntensity) {
+        return res.status(409).json({
+          message: `A challenge with intensity "${req.body.intensity}" already exists in group "${req.body.intensityGroupId}"`,
+          error: "DUPLICATE_INTENSITY",
+        });
+      }
+
+      // Inherit price/currency/access from existing group siblings
+      const existingSibling = await Challenges.findOne({
+        intensityGroupId: req.body.intensityGroupId,
+      }).select("price currency access").lean();
+      if (existingSibling) {
+        req.body.price = existingSibling.price;
+        req.body.currency = existingSibling.currency;
+        req.body.access = existingSibling.access;
+      }
+    }
+
     // Generate or use provided translationKey
     const translationKey = req.body.translationKey ||
       generateTranslationKey("challenge", req.body.challengeName);
@@ -146,6 +182,8 @@ const createChallenge = asyncHandler(async (req, res, next) => {
       allowReviews: req.body.allowReviews,
       createPost: req.body.createPost,
       // alternativeLanguage removed - using translationKey for multi-language support
+      intensityGroupId: req.body.intensityGroupId || undefined,
+      intensity: req.body.intensity || undefined,
     });
 
     newChallenge = await newChallenge.save();
@@ -283,7 +321,19 @@ const getChallengeById = asyncHandler(async (req, res) => {
   ]);
 
   if (challenge) {
-    res.json(challenge);
+    const challengeObj = challenge.toObject ? challenge.toObject() : { ...challenge };
+    // Determine if this challenge is the group head (first created in its intensity group)
+    if (challengeObj.intensityGroupId) {
+      const headChallenge = await Challenges.findOne({
+        intensityGroupId: challengeObj.intensityGroupId,
+      }).sort({ _id: 1 }).select("_id challengeName").lean();
+      challengeObj.isGroupHead = headChallenge && headChallenge._id.toString() === challengeObj._id.toString();
+      if (!challengeObj.isGroupHead && headChallenge) {
+        challengeObj.groupHeadName = headChallenge.challengeName;
+        challengeObj.groupHeadId = headChallenge._id;
+      }
+    }
+    res.json(challengeObj);
   } else {
     res.status(404);
     throw new Error("Challenge not found");
@@ -362,8 +412,39 @@ const getAllChallenges = asyncHandler(async (req, res) => {
   }
 
   if (challenges) {
+    // Deduplicate by intensityGroupId: for each group, return one representative
+    // challenge with intensityVariants attached
+    const groupMap = {};
+    const result = [];
+    for (const c of challenges) {
+      if (c.intensityGroupId) {
+        if (!groupMap[c.intensityGroupId]) {
+          groupMap[c.intensityGroupId] = {
+            representative: c,
+            variants: [],
+          };
+        }
+        groupMap[c.intensityGroupId].variants.push({
+          _id: c._id,
+          intensity: c.intensity,
+          challengeName: c.challengeName,
+        });
+      } else {
+        result.push(c);
+      }
+    }
+    // Add grouped challenges (one per group) with intensityVariants
+    for (const groupId of Object.keys(groupMap)) {
+      const group = groupMap[groupId];
+      const rep = group.representative.toObject
+        ? group.representative.toObject()
+        : { ...group.representative };
+      rep.intensityVariants = group.variants;
+      result.push(rep);
+    }
+
     res.status(200).json({
-      challenges,
+      challenges: result,
     });
   } else {
     res.status(404);
@@ -535,6 +616,29 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
       }
     }
 
+    // Validate intensity grouping on update
+    const newIntensityGroupId = req.body.intensityGroupId !== undefined ? req.body.intensityGroupId : challenge.intensityGroupId;
+    const newIntensity = req.body.intensity !== undefined ? req.body.intensity : challenge.intensity;
+    if (newIntensityGroupId) {
+      if (!newIntensity) {
+        return res.status(400).json({
+          message: "Intensity is required when using intensity grouping",
+          error: "INTENSITY_FIELDS_REQUIRED",
+        });
+      }
+      const duplicateIntensity = await Challenges.findOne({
+        intensityGroupId: newIntensityGroupId,
+        intensity: newIntensity,
+        _id: { $ne: challenge._id },
+      });
+      if (duplicateIntensity) {
+        return res.status(409).json({
+          message: `A challenge with intensity "${newIntensity}" already exists in group "${newIntensityGroupId}"`,
+          error: "DUPLICATE_INTENSITY",
+        });
+      }
+    }
+
     let update;
     update = {
         challengeName: req.body.challengeName
@@ -581,10 +685,25 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
         translationKey: req.body.translationKey !== undefined
           ? req.body.translationKey
           : challenge.translationKey,
+        intensityGroupId: req.body.intensityGroupId !== undefined
+          ? req.body.intensityGroupId
+          : challenge.intensityGroupId,
+        intensity: req.body.intensity !== undefined
+          ? req.body.intensity
+          : challenge.intensity,
       };
       await Challenges.findByIdAndUpdate(challenge._id, update, {
         useFindAndModify: false,
       });
+
+      // Sync price/currency/access to all siblings in the same intensity group
+      if (update.intensityGroupId) {
+        await Challenges.updateMany(
+          { intensityGroupId: update.intensityGroupId, _id: { $ne: challenge._id } },
+          { price: update.price, currency: update.currency, access: update.access }
+        );
+      }
+
       const updatedChallenge = await Challenges.findById(
         challenge._id
       ).populate([
@@ -861,6 +980,63 @@ const getChallengeByTranslationKey = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Get intensity groups scoped to the requesting trainer
+// @route   GET /api/challenges/intensity-groups
+const getIntensityGroups = asyncHandler(async (req, res) => {
+  // Accept comma-separated trainerIds or fall back to current user
+  const trainerIds = req.query.trainerIds
+    ? req.query.trainerIds.split(",").filter(Boolean)
+    : [req.user?.id];
+  const filter = {
+    intensityGroupId: { $exists: true, $ne: null, $ne: "" },
+    trainers: { $in: trainerIds },
+  };
+
+  const challenges = await Challenges.find(filter)
+    .select("intensityGroupId intensity challengeName price currency access")
+    .sort({ _id: 1 }) // oldest first — first in each group is the head
+    .lean();
+
+  // Group by intensityGroupId
+  const groupMap = {};
+  for (const c of challenges) {
+    if (!c.intensityGroupId) continue;
+    if (!groupMap[c.intensityGroupId]) {
+      // First challenge encountered (sorted by _id) is the group head
+      groupMap[c.intensityGroupId] = {
+        groupId: c.intensityGroupId,
+        challenges: [],
+        price: c.price,
+        currency: c.currency,
+        access: c.access,
+        headChallengeId: c._id.toString(),
+        headChallengeName: c.challengeName,
+      };
+    }
+    groupMap[c.intensityGroupId].challenges.push({
+      _id: c._id,
+      challengeName: c.challengeName,
+      intensity: c.intensity,
+      isHead: c._id.toString() === groupMap[c.intensityGroupId].headChallengeId,
+    });
+  }
+
+  res.status(200).json({ groups: Object.values(groupMap) });
+});
+
+// @desc    Get all challenges in an intensity group
+// @route   GET /api/challenges/group/:groupId
+const getChallengesByGroup = asyncHandler(async (req, res) => {
+  const challenges = await Challenges.find({
+    intensityGroupId: req.params.groupId,
+  }).select("_id challengeName intensity intensityGroupId thumbnailLink").sort({ _id: 1 }).lean();
+  // Mark the first challenge (oldest _id) as the group head
+  if (challenges.length > 0) {
+    challenges[0].isHead = true;
+  }
+  res.status(200).json({ challenges });
+});
+
 module.exports = {
   createChallenge,
   getChallengeById,
@@ -875,4 +1051,6 @@ module.exports = {
   destroy,
   getTranslationsByKey,
   getChallengeByTranslationKey,
+  getIntensityGroups,
+  getChallengesByGroup,
 };

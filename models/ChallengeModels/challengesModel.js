@@ -196,6 +196,14 @@ const challengesSchema = mongoose.Schema(
       required: true,
       default: 0,
     },
+    intensityGroupId: {
+      type: String,
+      index: true,
+    },
+    intensity: {
+      type: String,
+      enum: ["Easy", "Medium", "Hard"],
+    },
   },
 
   { timestamps: true }
