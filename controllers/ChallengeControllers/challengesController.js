@@ -667,7 +667,7 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
         results: req.body.results ? req.body.results : challenge.results,
         allowComments: req.body.allowComments,
         allowReviews: req.body.allowReviews,
-        isPublic: isAdmin ? req.body.isPublic : false,
+        isPublic: req.body.isPublic,
         adminApproved: isAdmin
           ? (req.body.adminApproved !== undefined ? req.body.adminApproved : challenge.adminApproved)
           : false,

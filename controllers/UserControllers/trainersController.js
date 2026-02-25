@@ -88,7 +88,7 @@ const getTrainerById = asyncHandler(async (req, res) => {
       const allChallenges = await Challenges.find({
         trainers: req.params.trainerId,
         isPublic: true,
-        isAdminApproved: true,
+        adminApproved: true,
       }).select(
         "challengeName thumbnailLink videoThumbnailLink informationList rating fitnessInterests intensityGroupId"
       );
