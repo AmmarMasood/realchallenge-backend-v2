@@ -9,13 +9,31 @@ const packageConfigSchema = mongoose.Schema(
       unique: true,
       enum: ["CHALLENGE_1", "CHALLENGE_3", "CHALLENGE_12"],
     },
-    // Display name - editable by admin
+    // Display name - editable by admin (legacy fallback)
     displayName: {
       type: String,
       required: true,
     },
-    // Short description
+    // Per-language display names
+    displayName_en: {
+      type: String,
+      default: "",
+    },
+    displayName_nl: {
+      type: String,
+      default: "",
+    },
+    // Short description (legacy fallback)
     description: {
+      type: String,
+      default: "",
+    },
+    // Per-language descriptions
+    description_en: {
+      type: String,
+      default: "",
+    },
+    description_nl: {
       type: String,
       default: "",
     },
@@ -44,8 +62,17 @@ const packageConfigSchema = mongoose.Schema(
       type: String,
       default: "",
     },
-    // Price display text (e.g., "€4.5 /Week")
+    // Price display text (e.g., "€4.5 /Week") - legacy fallback
     priceDisplayText: {
+      type: String,
+      default: "",
+    },
+    // Per-language price display text
+    priceDisplayText_en: {
+      type: String,
+      default: "",
+    },
+    priceDisplayText_nl: {
       type: String,
       default: "",
     },

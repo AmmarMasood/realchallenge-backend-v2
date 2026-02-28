@@ -134,8 +134,24 @@ const userSchema = mongoose.Schema(
     motto: {
       type: String,
     },
+    motto_en: {
+      type: String,
+      default: "",
+    },
+    motto_nl: {
+      type: String,
+      default: "",
+    },
     bio: {
       type: String,
+    },
+    bio_en: {
+      type: String,
+      default: "",
+    },
+    bio_nl: {
+      type: String,
+      default: "",
     },
     comments: [commentSchema],
     resetToken: String,

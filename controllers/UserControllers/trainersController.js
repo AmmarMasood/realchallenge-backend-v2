@@ -90,7 +90,7 @@ const getTrainerById = asyncHandler(async (req, res) => {
         isPublic: true,
         adminApproved: true,
       }).select(
-        "challengeName thumbnailLink videoThumbnailLink informationList rating fitnessInterests intensityGroupId"
+        "challengeName thumbnailLink videoThumbnailLink informationList rating fitnessInterests intensityGroupId language"
       );
 
       // Deduplicate by intensityGroupId: keep only one representative per group
@@ -145,7 +145,11 @@ const updateTrainerById = asyncHandler(async (req, res, next) => {
           ? req.body.videoTrailerLink
           : user.videoTrailerLink,
         motto: req.body.motto ? req.body.motto : user.motto,
+        motto_en: req.body.motto_en !== undefined ? req.body.motto_en : user.motto_en,
+        motto_nl: req.body.motto_nl !== undefined ? req.body.motto_nl : user.motto_nl,
         bio: req.body.bio ? req.body.bio : user.bio,
+        bio_en: req.body.bio_en !== undefined ? req.body.bio_en : user.bio_en,
+        bio_nl: req.body.bio_nl !== undefined ? req.body.bio_nl : user.bio_nl,
         trainerGoals: req.body.trainerGoals ? req.body.trainerGoals : [],
         trainersFitnessInterest: req.body.trainersFitnessInterest
           ? req.body.trainersFitnessInterest
