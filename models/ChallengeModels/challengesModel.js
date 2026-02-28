@@ -204,6 +204,10 @@ const challengesSchema = mongoose.Schema(
       type: String,
       enum: ["Easy", "Medium", "Hard"],
     },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
   },
 
   { timestamps: true }

@@ -122,7 +122,7 @@ const deleteCoupon = asyncHandler(async (req, res) => {
 // @route   PUT /api/coupons/:couponId
 const updateCoupon = asyncHandler(async (req, res, next) => {
   try {
-    const update = req.body;
+    const update = { ...req.body, updatedBy: req.user._id };
     const couponId = req.params.couponId;
     await Coupons.findByIdAndUpdate(couponId, update, {
       useFindAndModify: false,

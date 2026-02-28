@@ -43,6 +43,10 @@ const couponsSchema = mongoose.Schema(
         ref: "Challenges",
       },
     ],
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
   },
   {
     timestamps: true,

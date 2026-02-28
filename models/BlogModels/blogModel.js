@@ -52,6 +52,10 @@ const blogSchema = mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
   },
   { timestamps: true }
 );

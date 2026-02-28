@@ -113,23 +113,27 @@ const getAllUserRecipes = asyncHandler(async (req, res) => {
   if (req.query.language && req.query.language.length > 0) {
     if (hasRole(req.user, "admin")) {
       recipes = await Recipe.find({ language: req.query.language })
-        .populate("ingredients.name");
+        .populate("ingredients.name")
+        .populate("updatedBy");
     } else {
       recipes = await Recipe.find({
         user: req.user.id,
         language: req.query.language,
       })
-        .populate("ingredients.name");
+        .populate("ingredients.name")
+        .populate("updatedBy");
     }
   } else {
     if (hasRole(req.user, "admin")) {
       recipes = await Recipe.find({})
-        .populate("ingredients.name");
+        .populate("ingredients.name")
+        .populate("updatedBy");
     } else {
       recipes = await Recipe.find({
         user: req.user.id,
       })
-        .populate("ingredients.name");
+        .populate("ingredients.name")
+        .populate("updatedBy");
     }
   }
 
@@ -147,7 +151,7 @@ const getAllUserRecipes = asyncHandler(async (req, res) => {
 // @route   PUT /api/recipes/recipe/:recipeId
 const updateRecipe = asyncHandler(async (req, res, next) => {
   try {
-    const update = req.body;
+    const update = { ...req.body, updatedBy: req.user._id };
     const recipeId = req.params.recipeId;
     if (hasRole(req.user, "admin")) {
       await Recipe.findByIdAndUpdate(recipeId, update, {

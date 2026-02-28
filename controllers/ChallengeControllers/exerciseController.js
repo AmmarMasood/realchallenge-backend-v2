@@ -152,6 +152,7 @@ const updateExercise = asyncHandler(async (req, res, next) => {
       }
     }
 
+    update.updatedBy = req.user._id;
     const exercise = await Exercise.findByIdAndUpdate(exerciseId, update, {
       useFindAndModify: false,
       new: true,
@@ -192,7 +193,7 @@ const getAllExercises = asyncHandler(async (req, res) => {
 const getAllUserExercises = asyncHandler(async (req, res) => {
   let exercises;
   const includeAssigned = req.query.includeAssigned === 'true';
-  const populateFields = ["user", "trainer"];
+  const populateFields = ["user", "trainer", "updatedBy"];
 
   if (req.query.language && req.query.language.length > 0) {
     if (hasRole(req.user, "admin")) {

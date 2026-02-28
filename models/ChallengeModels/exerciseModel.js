@@ -39,6 +39,10 @@ const exerciseSchema = mongoose.Schema(
     voiceOverLink: {
       type: String,
     },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
   },
   { timestamps: true }
 );

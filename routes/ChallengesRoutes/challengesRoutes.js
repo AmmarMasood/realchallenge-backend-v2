@@ -17,6 +17,7 @@ const {
   getChallengeByTranslationKey,
   getIntensityGroups,
   getChallengesByGroup,
+  getChallengeVersion,
 } = require("../../controllers/ChallengeControllers/challengesController");
 const { protect } = require("../../middlewares/authMiddleware");
 
@@ -33,6 +34,7 @@ router.get("/group/:groupId", getChallengesByGroup);
 router.get("/users/all", protect, getAllUserChallenges);
 router.get("/translations/:translationKey", getTranslationsByKey);
 router.get("/translation/:translationKey/:language", getChallengeByTranslationKey);
+router.get("/:challengeId/version", protect, getChallengeVersion);
 router.get("/:challengeId", getChallengeById);
 router.get("/:challengeId/:weekId", getWeekByID);
 router.put("/:challengeId", protect, updateChallenge);

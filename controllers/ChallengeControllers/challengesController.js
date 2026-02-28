@@ -297,6 +297,7 @@ const getChallengeById = asyncHandler(async (req, res) => {
     "music",
     "comments.user",
     "reviews.user",
+    { path: "updatedBy", select: "firstName lastName username" },
 
     //"weeks.workouts",
     {
@@ -465,6 +466,7 @@ const getAllUserChallenges = asyncHandler(async (req, res) => {
     "trainersFitnessInterest",
     "music",
     "user",
+    "updatedBy",
     {
       path: "weeks",
       populate: [
@@ -580,7 +582,7 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
         musicsResolved = await musics;
       }
     }
-    const challenge = await Challenges.findById(req.params.challengeId);
+    const challenge = await Challenges.findById(req.params.challengeId).populate("updatedBy", "firstName lastName username");
     if (!challenge) {
       res.status(404);
       throw new Error("Challenge not found");
@@ -596,6 +598,20 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
     if (!isAdmin && !isCreator && !isAssignedTrainer) {
       return res.status(403).json({
         message: "Not authorized to update this challenge",
+      });
+    }
+
+    // Optimistic locking: reject if the challenge was modified since the client loaded it
+    if (req.body.__v !== undefined && challenge.__v !== req.body.__v) {
+      const updatedByName = challenge.updatedBy
+        ? (challenge.updatedBy.firstName || challenge.updatedBy.username || "Someone")
+        : "Someone";
+      return res.status(409).json({
+        error: "VERSION_CONFLICT",
+        message: `This challenge was modified by ${updatedByName} since you loaded it. Please reload and try again.`,
+        updatedBy: updatedByName,
+        updatedAt: challenge.updatedAt,
+        currentVersion: challenge.__v,
       });
     }
 
@@ -639,8 +655,12 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
       }
     }
 
+    // Strip __v from the request body so it doesn't overwrite the version
+    delete req.body.__v;
+
     let update;
     update = {
+        updatedBy: req.user._id,
         challengeName: req.body.challengeName
           ? req.body.challengeName
           : challenge.challengeName,
@@ -692,7 +712,7 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
           ? req.body.intensity
           : challenge.intensity,
       };
-      await Challenges.findByIdAndUpdate(challenge._id, update, {
+      await Challenges.findByIdAndUpdate(challenge._id, { $set: update, $inc: { __v: 1 } }, {
         useFindAndModify: false,
       });
 
@@ -1037,6 +1057,29 @@ const getChallengesByGroup = asyncHandler(async (req, res) => {
   res.status(200).json({ challenges });
 });
 
+// @desc    Lightweight version check for optimistic locking
+// @route   GET /api/challenges/:challengeId/version
+const getChallengeVersion = asyncHandler(async (req, res) => {
+  const challenge = await Challenges.findById(req.params.challengeId)
+    .select("__v updatedBy updatedAt")
+    .populate("updatedBy", "firstName lastName username")
+    .lean();
+
+  if (!challenge) {
+    return res.status(404).json({ message: "Challenge not found" });
+  }
+
+  const updatedByName = challenge.updatedBy
+    ? (challenge.updatedBy.firstName || challenge.updatedBy.username || "Someone")
+    : null;
+
+  res.status(200).json({
+    __v: challenge.__v,
+    updatedBy: updatedByName,
+    updatedAt: challenge.updatedAt,
+  });
+});
+
 module.exports = {
   createChallenge,
   getChallengeById,
@@ -1053,4 +1096,5 @@ module.exports = {
   getChallengeByTranslationKey,
   getIntensityGroups,
   getChallengesByGroup,
+  getChallengeVersion,
 };

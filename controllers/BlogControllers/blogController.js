@@ -185,7 +185,7 @@ const deleteBlog = asyncHandler(async (req, res) => {
 // @access  Admin & Blogger
 const updateBlog = asyncHandler(async (req, res, next) => {
   try {
-    const update = req.body;
+    const update = { ...req.body, updatedBy: req.user._id };
     const blogId = req.params.blogId;
     if (hasRole(req.user, "admin")) {
       await Blog.findByIdAndUpdate(blogId, update, {
