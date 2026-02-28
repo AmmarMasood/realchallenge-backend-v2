@@ -90,18 +90,37 @@ const getTrainerById = asyncHandler(async (req, res) => {
         isPublic: true,
         adminApproved: true,
       }).select(
-        "challengeName thumbnailLink videoThumbnailLink informationList rating fitnessInterests intensityGroupId language"
+        "challengeName thumbnailLink videoThumbnailLink informationList rating fitnessInterests intensityGroupId intensity language"
       );
 
-      // Deduplicate by intensityGroupId: keep only one representative per group
-      const groupSeen = {};
-      const challenges = allChallenges.filter((c) => {
+      // Deduplicate by intensityGroupId and attach intensityVariants
+      const groupMap = {};
+      const challenges = [];
+      for (const c of allChallenges) {
         if (c.intensityGroupId) {
-          if (groupSeen[c.intensityGroupId]) return false;
-          groupSeen[c.intensityGroupId] = true;
+          if (!groupMap[c.intensityGroupId]) {
+            groupMap[c.intensityGroupId] = {
+              representative: c,
+              variants: [],
+            };
+          }
+          groupMap[c.intensityGroupId].variants.push({
+            _id: c._id,
+            intensity: c.intensity,
+            challengeName: c.challengeName,
+          });
+        } else {
+          challenges.push(c);
         }
-        return true;
-      });
+      }
+      for (const groupId of Object.keys(groupMap)) {
+        const group = groupMap[groupId];
+        const rep = group.representative.toObject
+          ? group.representative.toObject()
+          : { ...group.representative };
+        rep.intensityVariants = group.variants;
+        challenges.push(rep);
+      }
 
       return res.status(201).json({
         message: "Trainer fetched successfully",

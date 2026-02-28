@@ -1049,6 +1049,8 @@ const getIntensityGroups = asyncHandler(async (req, res) => {
 const getChallengesByGroup = asyncHandler(async (req, res) => {
   const challenges = await Challenges.find({
     intensityGroupId: req.params.groupId,
+    isPublic: true,
+    adminApproved: true,
   }).select("_id challengeName intensity intensityGroupId thumbnailLink").sort({ _id: 1 }).lean();
   // Mark the first challenge (oldest _id) as the group head
   if (challenges.length > 0) {
