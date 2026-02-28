@@ -1594,6 +1594,40 @@ const thumbnailCallback = asyncHandler(async (req, res) => {
   res.status(200).json({ message: "Callback received (thumbnail failed)" });
 });
 
+// @desc    Retry video optimization for a failed file
+// @route   POST /api/media/retry-optimization/:fileId
+// @access  Private
+const retryOptimization = asyncHandler(async (req, res) => {
+  const mediaFile = await MediaFiles.findById(req.params.fileId);
+
+  if (!mediaFile) {
+    return res.status(404).json({ message: "Media file not found" });
+  }
+
+  if (mediaFile.processingStatus !== "failed") {
+    return res.status(400).json({ message: "Only failed files can be retried" });
+  }
+
+  const folderId = mediaFile.folderId.toString();
+  const s3Key = `${folderId}/${mediaFile.filename}`;
+
+  try {
+    const jobId = await mediaConvertService.createTranscodeJob(
+      s3Key,
+      folderId,
+      mediaFile._id.toString()
+    );
+    mediaFile.processingStatus = "processing";
+    mediaFile.mediaConvertJobId = jobId;
+    await mediaFile.save();
+    console.log(`[MediaConvert] Retry job ${jobId} for file ${mediaFile._id}`);
+    return res.status(200).json({ message: "Optimization retry started", jobId });
+  } catch (err) {
+    console.error("[MediaConvert] Retry failed:", err.message);
+    return res.status(500).json({ message: "Failed to start retry", error: err.message });
+  }
+});
+
 module.exports = {
   testMediaRoute,
   createMediaFolder,
@@ -1617,4 +1651,5 @@ module.exports = {
   presignUpload,
   confirmUpload,
   thumbnailCallback,
+  retryOptimization,
 };

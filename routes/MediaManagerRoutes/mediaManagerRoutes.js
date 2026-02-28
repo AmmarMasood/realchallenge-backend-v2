@@ -27,6 +27,7 @@ const {
   presignUpload,
   confirmUpload,
   thumbnailCallback,
+  retryOptimization,
 } = require("../../controllers/MediaControllers/mediaController");
 
 const {
@@ -94,6 +95,7 @@ router.get("/search", protect, admin, searchMediaFiles);
 router.post("/presign", protect, presignUpload);
 router.post("/confirm-upload", protect, confirmUpload);
 router.post("/thumbnail-callback", thumbnailCallback); // shared secret auth, no protect
+router.post("/retry-optimization/:fileId", protect, retryOptimization);
 
 // Multer error handling middleware
 const handleMulterError = (err, req, res, next) => {
