@@ -703,7 +703,7 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
         trainers: req.body.trainers ? req.body.trainers : challenge.trainers,
         music: musicsResolved,
         translationKey: req.body.translationKey !== undefined
-          ? req.body.translationKey
+          ? (req.body.translationKey || generateTranslationKey("challenge", req.body.challengeName || challenge.challengeName))
           : challenge.translationKey,
         intensityGroupId: req.body.intensityGroupId !== undefined
           ? req.body.intensityGroupId
