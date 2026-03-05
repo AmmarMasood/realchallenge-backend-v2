@@ -109,6 +109,18 @@ const createChallenge = asyncHandler(async (req, res, next) => {
           error: "INTENSITY_FIELDS_REQUIRED",
         });
       }
+      // Validate language: all challenges in a group must share the same language
+      const existingSibling = await Challenges.findOne({
+        intensityGroupId: req.body.intensityGroupId,
+      }).select("price currency access language").lean();
+      if (existingSibling && existingSibling.language && req.body.language &&
+          existingSibling.language !== req.body.language) {
+        return res.status(409).json({
+          message: `Cannot add a ${req.body.language} challenge to a group that contains ${existingSibling.language} challenges. Intensity groups must be same-language.`,
+          error: "INTENSITY_GROUP_LANGUAGE_MISMATCH",
+        });
+      }
+
       // Check uniqueness: no two challenges can share intensityGroupId + intensity
       const duplicateIntensity = await Challenges.findOne({
         intensityGroupId: req.body.intensityGroupId,
@@ -120,11 +132,6 @@ const createChallenge = asyncHandler(async (req, res, next) => {
           error: "DUPLICATE_INTENSITY",
         });
       }
-
-      // Inherit price/currency/access from existing group siblings
-      const existingSibling = await Challenges.findOne({
-        intensityGroupId: req.body.intensityGroupId,
-      }).select("price currency access").lean();
       if (existingSibling) {
         req.body.price = existingSibling.price;
         req.body.currency = existingSibling.currency;
@@ -632,6 +639,11 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
       }
     }
 
+    // Auto-generate intensityGroupId on update when grouping is requested but no groupId provided
+    if (req.body.multipleIntensities && !req.body.intensityGroupId && !challenge.intensityGroupId) {
+      req.body.intensityGroupId = "grp_" + require("crypto").randomBytes(4).toString("hex");
+    }
+
     // Validate intensity grouping on update
     const newIntensityGroupId = req.body.intensityGroupId !== undefined ? req.body.intensityGroupId : challenge.intensityGroupId;
     const newIntensity = req.body.intensity !== undefined ? req.body.intensity : challenge.intensity;
@@ -642,6 +654,19 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
           error: "INTENSITY_FIELDS_REQUIRED",
         });
       }
+      // Validate language: all challenges in a group must share the same language
+      const groupSibling = await Challenges.findOne({
+        intensityGroupId: newIntensityGroupId,
+        _id: { $ne: challenge._id },
+      }).select("language").lean();
+      if (groupSibling && groupSibling.language && challenge.language &&
+          groupSibling.language !== challenge.language) {
+        return res.status(409).json({
+          message: `Cannot add a ${challenge.language} challenge to a group that contains ${groupSibling.language} challenges. Intensity groups must be same-language.`,
+          error: "INTENSITY_GROUP_LANGUAGE_MISMATCH",
+        });
+      }
+
       const duplicateIntensity = await Challenges.findOne({
         intensityGroupId: newIntensityGroupId,
         intensity: newIntensity,
@@ -1011,6 +1036,10 @@ const getIntensityGroups = asyncHandler(async (req, res) => {
     intensityGroupId: { $exists: true, $ne: null, $ne: "" },
     trainers: { $in: trainerIds },
   };
+  // Filter by language so groups only show same-language challenges
+  if (req.query.language) {
+    filter.language = req.query.language;
+  }
 
   const challenges = await Challenges.find(filter)
     .select("intensityGroupId intensity challengeName price currency access")
