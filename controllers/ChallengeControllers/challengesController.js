@@ -46,11 +46,17 @@ const createChallenge = asyncHandler(async (req, res, next) => {
       ? req.body.trainers
       : [req.user.id]; // If no trainers assigned, use creator as owner
 
-    const existingChallenge = await Challenges.findOne({
+    const duplicateNameFilter = {
       trainers: { $in: trainersToCheck },
       language: req.body.language,
       challengeName: { $regex: new RegExp(`^${escapeRegex(req.body.challengeName)}$`, 'i') },
-    });
+    };
+    // Allow same name within the same intensity group
+    if (req.body.intensityGroupId) {
+      duplicateNameFilter.intensityGroupId = { $ne: req.body.intensityGroupId };
+    }
+    console.log("Duplicate name check - intensityGroupId:", req.body.intensityGroupId, "filter:", JSON.stringify(duplicateNameFilter));
+    const existingChallenge = await Challenges.findOne(duplicateNameFilter);
 
     if (existingChallenge) {
       return res.status(409).json({
@@ -559,12 +565,20 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
       const languageToCheck = req.body.language || challenge.language;
       const nameToCheck = req.body.challengeName || challenge.challengeName;
 
-      const existingChallenge = await Challenges.findOne({
+      const duplicateNameFilter = {
         trainers: { $in: trainersToCheck },
         language: languageToCheck,
         challengeName: { $regex: new RegExp(`^${escapeRegex(nameToCheck)}$`, 'i') },
         _id: { $ne: req.params.challengeId }, // Exclude the current challenge
-      });
+      };
+      // Allow same name within the same intensity group
+      const groupId = req.body.intensityGroupId !== undefined
+        ? req.body.intensityGroupId
+        : challenge.intensityGroupId;
+      if (groupId) {
+        duplicateNameFilter.intensityGroupId = { $ne: groupId };
+      }
+      const existingChallenge = await Challenges.findOne(duplicateNameFilter);
 
       if (existingChallenge) {
         return res.status(409).json({
