@@ -10,7 +10,11 @@ const getAllRequests = asyncHandler(async (req, res) => {
   try {
     const recipes = await Recipe.find({});
     const blogs = await Blog.find({});
-    const challenges = await Challenges.find({});
+    const challenges = await Challenges.find({}).populate([
+      { path: "updatedBy", select: "firstName lastName username" },
+      { path: "user", select: "firstName lastName username" },
+      { path: "trainers", select: "firstName lastName username" },
+    ]);
     res.status(200).json({
       recipes: recipes,
       blogs: blogs,

@@ -208,6 +208,15 @@ const challengesSchema = mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    editLock: {
+      lockedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+      lockedByName: { type: String, default: null },
+      lockedAt: { type: Date, default: null },
+    },
   },
 
   { timestamps: true }

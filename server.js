@@ -134,4 +134,20 @@ app.listen(PORT, () => {
   setInterval(() => {
     cleanupStaleProcessing(60 * 60 * 1000);
   }, 5 * 60 * 1000); // Check every 5 minutes
+
+  // Stale edit lock cleanup — release locks older than 30 seconds (heartbeat is every 10s)
+  const { Challenges } = require("./models/ChallengeModels/challengesModel");
+  setInterval(async () => {
+    try {
+      const result = await Challenges.updateMany(
+        { "editLock.lockedAt": { $lt: new Date(Date.now() - 30 * 1000) }, "editLock.lockedBy": { $ne: null } },
+        { $set: { "editLock.lockedBy": null, "editLock.lockedByName": null, "editLock.lockedAt": null } }
+      );
+      if (result.modifiedCount > 0) {
+        console.log(`[EditLock Cleanup] Released ${result.modifiedCount} stale edit lock(s)`);
+      }
+    } catch (err) {
+      console.error("[EditLock Cleanup] Error:", err.message);
+    }
+  }, 10 * 1000); // Check every 10 seconds
 });

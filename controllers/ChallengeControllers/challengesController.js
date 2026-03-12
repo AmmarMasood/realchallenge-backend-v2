@@ -3,6 +3,7 @@
   TODO:2 Create Membership Logic and pass id here in challenge
 */
 
+const jwt = require("jsonwebtoken");
 const asyncHandler = require("express-async-handler");
 const { body, validationResult } = require("express-validator");
 const { roles } = require("../../utils/roles");
@@ -622,6 +623,22 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
       });
     }
 
+    // Edit lock check: reject if locked by another user and not expired
+    const LOCK_TIMEOUT_MS = 30 * 1000; // 30 seconds — heartbeat renews every 10s
+    if (
+      challenge.editLock &&
+      challenge.editLock.lockedBy &&
+      challenge.editLock.lockedBy.toString() !== req.user.id &&
+      challenge.editLock.lockedAt &&
+      new Date() - new Date(challenge.editLock.lockedAt) < LOCK_TIMEOUT_MS
+    ) {
+      return res.status(423).json({
+        error: "CHALLENGE_LOCKED",
+        lockedBy: challenge.editLock.lockedByName || "Someone",
+        lockedAt: challenge.editLock.lockedAt,
+      });
+    }
+
     // Optimistic locking: reject if the challenge was modified since the client loaded it
     if (req.body.__v !== undefined && challenge.__v !== req.body.__v) {
       const updatedByName = challenge.updatedBy
@@ -751,6 +768,11 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
           ? req.body.intensity
           : challenge.intensity,
       };
+      // Release the edit lock on save
+      update["editLock.lockedBy"] = null;
+      update["editLock.lockedByName"] = null;
+      update["editLock.lockedAt"] = null;
+
       await Challenges.findByIdAndUpdate(challenge._id, { $set: update, $inc: { __v: 1 } }, {
         useFindAndModify: false,
       });
@@ -1125,6 +1147,145 @@ const getChallengeVersion = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc    Acquire edit lock on a challenge
+// @route   POST /api/challenges/:challengeId/lock
+const acquireEditLock = asyncHandler(async (req, res) => {
+  const LOCK_TIMEOUT_MS = 30 * 1000; // 30 seconds — heartbeat renews every 10s // 30 minutes
+  const challengeId = req.params.challengeId;
+  const userId = req.user._id;
+  const userName = req.user.firstName
+    ? `${req.user.firstName} ${req.user.lastName || ""}`.trim()
+    : req.user.username || "Someone";
+
+  // Atomic: only acquire if unlocked, expired, or same user
+  const result = await Challenges.findOneAndUpdate(
+    {
+      _id: challengeId,
+      $or: [
+        { "editLock.lockedBy": null },
+        { "editLock.lockedBy": userId },
+        { "editLock.lockedAt": { $lt: new Date(Date.now() - LOCK_TIMEOUT_MS) } },
+      ],
+    },
+    {
+      $set: {
+        "editLock.lockedBy": userId,
+        "editLock.lockedByName": userName,
+        "editLock.lockedAt": new Date(),
+      },
+    },
+    { new: true }
+  );
+
+  if (result) {
+    return res.status(200).json({
+      locked: true,
+      expiresAt: new Date(result.editLock.lockedAt.getTime() + LOCK_TIMEOUT_MS),
+    });
+  }
+
+  // Lock held by someone else — fetch to report who
+  const challenge = await Challenges.findById(challengeId).select("editLock").lean();
+  if (!challenge) {
+    return res.status(404).json({ message: "Challenge not found" });
+  }
+
+  return res.status(423).json({
+    error: "CHALLENGE_LOCKED",
+    lockedBy: challenge.editLock.lockedByName || "Someone",
+    lockedAt: challenge.editLock.lockedAt,
+  });
+});
+
+// @desc    Release edit lock on a challenge
+// @route   DELETE /api/challenges/:challengeId/lock
+const releaseEditLock = asyncHandler(async (req, res) => {
+  const challengeId = req.params.challengeId;
+  const userId = req.user._id;
+  const isAdmin = hasRole(req.user, "admin");
+
+  // Only the lock holder or an admin can release
+  const filter = { _id: challengeId };
+  if (!isAdmin) {
+    filter["editLock.lockedBy"] = userId;
+  }
+
+  await Challenges.findOneAndUpdate(filter, {
+    $set: {
+      "editLock.lockedBy": null,
+      "editLock.lockedByName": null,
+      "editLock.lockedAt": null,
+    },
+  });
+
+  res.status(200).json({ released: true });
+});
+
+// @desc    Renew (heartbeat) edit lock on a challenge
+// @route   PUT /api/challenges/:challengeId/lock
+const renewEditLock = asyncHandler(async (req, res) => {
+  const challengeId = req.params.challengeId;
+  const userId = req.user._id;
+
+  const result = await Challenges.findOneAndUpdate(
+    { _id: challengeId, "editLock.lockedBy": userId },
+    { $set: { "editLock.lockedAt": new Date() } },
+    { new: true }
+  );
+
+  if (!result) {
+    return res.status(403).json({ message: "You do not hold the lock on this challenge" });
+  }
+
+  const LOCK_TIMEOUT_MS = 30 * 1000; // 30 seconds — heartbeat renews every 10s
+  res.status(200).json({
+    renewed: true,
+    expiresAt: new Date(result.editLock.lockedAt.getTime() + LOCK_TIMEOUT_MS),
+  });
+});
+
+// @desc    Release edit lock via sendBeacon (POST because sendBeacon only supports POST)
+// @route   POST /api/challenges/:challengeId/unlock
+// NOTE: This route does NOT use protect middleware — it extracts the token from the body
+//       because sendBeacon cannot set Authorization headers.
+const releaseEditLockBeacon = asyncHandler(async (req, res) => {
+  const challengeId = req.params.challengeId;
+  const token = req.body.token;
+
+  if (!token) {
+    return res.status(401).json({ message: "No token provided" });
+  }
+
+  let decoded;
+  try {
+    const rawToken = token.startsWith("Bearer ") ? token.split(" ")[1] : token;
+    decoded = jwt.verify(rawToken, process.env.JWT_SECRET);
+  } catch (err) {
+    return res.status(401).json({ message: "Invalid token" });
+  }
+
+  const user = await User.findById(decoded.id).select("roles");
+  if (!user) {
+    return res.status(401).json({ message: "User not found" });
+  }
+
+  const isAdmin = hasRole(user, "admin");
+  const filter = { _id: challengeId };
+  if (!isAdmin) {
+    filter["editLock.lockedBy"] = user._id;
+  }
+
+  await Challenges.findOneAndUpdate(filter, {
+    $set: {
+      "editLock.lockedBy": null,
+      "editLock.lockedByName": null,
+      "editLock.lockedAt": null,
+    },
+  });
+
+  res.status(200).json({ released: true });
+});
+
 module.exports = {
   createChallenge,
   getChallengeById,
@@ -1142,4 +1303,8 @@ module.exports = {
   getIntensityGroups,
   getChallengesByGroup,
   getChallengeVersion,
+  acquireEditLock,
+  releaseEditLock,
+  renewEditLock,
+  releaseEditLockBeacon,
 };
