@@ -150,6 +150,14 @@ const recipeSchema = mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    claps: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+      },
+    ],
     updatedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

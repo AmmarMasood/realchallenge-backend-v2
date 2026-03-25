@@ -367,6 +367,76 @@ const getRecipeByTranslationKey = asyncHandler(async (req, res) => {
   }
 });
 
+// @route    PUT /api/recipes/recipe/:id/clap
+// @desc     Clap a Recipe
+// @access   Private
+const clapRecipe = asyncHandler(async (req, res) => {
+  try {
+    const recipe = await Recipe.findById(req.params.id);
+
+    if (!recipe) {
+      return res.status(404).json({ msg: "Recipe not found" });
+    }
+
+    // Creator cannot clap their own recipe
+    if (recipe.user && recipe.user.toString() === req.user.id) {
+      return res.status(403).json({ msg: "Cannot clap your own recipe" });
+    }
+
+    // Check if already clapped by this user
+    if (
+      recipe.claps.filter((clap) => clap.user.toString() === req.user.id)
+        .length > 0
+    ) {
+      return res.status(400).json({ msg: "Recipe already clapped" });
+    }
+
+    recipe.claps.unshift({ user: req.user.id });
+
+    await recipe.save();
+
+    res.status(200).json(recipe.claps);
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).send("Server Error");
+  }
+});
+
+// @route    PUT /api/recipes/recipe/:id/unclap
+// @desc     Unclap a Recipe
+// @access   Private
+const unclapRecipe = asyncHandler(async (req, res) => {
+  try {
+    const recipe = await Recipe.findById(req.params.id);
+
+    if (!recipe) {
+      return res.status(404).json({ msg: "Recipe not found" });
+    }
+
+    // Check if not yet clapped
+    if (
+      recipe.claps.filter((clap) => clap.user.toString() === req.user.id)
+        .length === 0
+    ) {
+      return res.status(400).json({ msg: "Recipe has not yet been clapped" });
+    }
+
+    // Get remove index
+    const removeIndex = recipe.claps
+      .map((clap) => clap.user.toString())
+      .indexOf(req.user.id);
+
+    recipe.claps.splice(removeIndex, 1);
+
+    await recipe.save();
+
+    res.json(recipe.claps);
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).send("Server Error");
+  }
+});
+
 module.exports = {
   createRecipe,
   getRecipeById,
@@ -379,4 +449,6 @@ module.exports = {
   destroy,
   getTranslationsByKey,
   getRecipeByTranslationKey,
+  clapRecipe,
+  unclapRecipe,
 };

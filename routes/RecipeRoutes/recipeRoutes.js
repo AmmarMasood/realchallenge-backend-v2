@@ -12,6 +12,8 @@ const {
   getAllUserRecipes,
   getTranslationsByKey,
   getRecipeByTranslationKey,
+  clapRecipe,
+  unclapRecipe,
 } = require("../../controllers/RecipeControllers/recipeController");
 
 router.get("/translations/:translationKey", getTranslationsByKey);
@@ -24,5 +26,7 @@ router.post("/:id/reviews", protect, createRecipeReview);
 router.get("/:recipeId", getRecipeById);
 router.delete("/:recipeId", deleteRecipe);
 router.post("/:recipeId/comments", protect, createRecipeComment);
+router.put("/:id/clap", protect, clapRecipe);
+router.put("/:id/unclap", protect, unclapRecipe);
 
 module.exports = router;

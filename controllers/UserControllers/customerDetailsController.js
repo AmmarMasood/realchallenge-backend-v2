@@ -256,9 +256,19 @@ const setFavouriteRecipe = asyncHandler(async (req, res, next) => {
       return;
     }
     let favourite = req.body.recipeId;
+
+    // Creator cannot favourite their own recipe
+    const recipeToFav = await Recipe.findById(favourite);
+    if (recipeToFav && recipeToFav.user && recipeToFav.user.toString() === req.params.customerId) {
+      return res.status(403).json({ msg: "Cannot favourite your own recipe" });
+    }
+
     const user = await User.findById(req.params.customerId).populate(
       "customerDetails"
     );
+    if (!user || !user.customerDetails) {
+      return res.status(400).json({ msg: "User profile not found" });
+    }
     let favRecipe = await user.customerDetails.favouriteRecipes;
 
     // check if post already being liked by user
