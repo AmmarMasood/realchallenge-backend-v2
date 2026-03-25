@@ -5,7 +5,6 @@ const ingredientSchema = mongoose.Schema(
   {
     name: {
       type: String,
-      unique: true,
     },
     language: {
       type: String,
@@ -14,5 +13,7 @@ const ingredientSchema = mongoose.Schema(
   },
   { timestamps: true }
 );
+
+ingredientSchema.index({ name: 1, language: 1 }, { unique: true });
 
 exports.Ingredient = mongoose.model("Ingredient", ingredientSchema);

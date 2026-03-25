@@ -5,7 +5,6 @@ const foodTypeSchema = mongoose.Schema(
   {
     name: {
       type: String,
-      unique: true,
     },
     language: {
       type: String,
@@ -14,5 +13,7 @@ const foodTypeSchema = mongoose.Schema(
   },
   { timestamps: true }
 );
+
+foodTypeSchema.index({ name: 1, language: 1 }, { unique: true });
 
 exports.FoodType = mongoose.model("FoodType", foodTypeSchema);

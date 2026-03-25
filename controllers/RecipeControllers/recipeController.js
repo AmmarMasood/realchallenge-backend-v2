@@ -47,6 +47,7 @@ const createRecipe = asyncHandler(async (req, res, next) => {
       isPublic: req.body.isPublic,
       allowComments: req.body.allowComments,
       allowReviews: req.body.allowReviews,
+      adminApproved: hasRole(req.user, "admin") ? true : false,
       // alternativeLanguage removed - using translationKey for multi-language support
     });
 
@@ -196,6 +197,11 @@ const createRecipeReview = asyncHandler(async (req, res, next) => {
     const recipe = await Recipe.findById(req.params.id);
 
     if (recipe) {
+      if (!recipe.allowReviews) {
+        res.status(403);
+        throw new Error("Reviews are not allowed for this recipe");
+      }
+
       const alreadyReviewed = recipe.reviews.find(
         (r) => r.user.toString() === req.user._id.toString()
       );
@@ -262,6 +268,11 @@ const createRecipeComment = asyncHandler(async (req, res, next) => {
 
     const recipe = await Recipe.findById(req.params.recipeId);
     if (recipe) {
+      if (!recipe.allowComments) {
+        res.status(403);
+        throw new Error("Comments are not allowed for this recipe");
+      }
+
       const comment = {
         user: req.user._id,
         text: text,

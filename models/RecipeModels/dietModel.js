@@ -5,7 +5,6 @@ const dietSchema = mongoose.Schema(
   {
     name: {
       type: String,
-      unique: true,
     },
     language: {
       type: String,
@@ -14,5 +13,7 @@ const dietSchema = mongoose.Schema(
   },
   { timestamps: true }
 );
+
+dietSchema.index({ name: 1, language: 1 }, { unique: true });
 
 exports.Diet = mongoose.model("Diet", dietSchema);
