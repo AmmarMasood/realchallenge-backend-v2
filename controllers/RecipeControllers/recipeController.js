@@ -1,6 +1,8 @@
+const jwt = require("jsonwebtoken");
 const asyncHandler = require("express-async-handler");
 const { validationResult } = require("express-validator");
 const { Recipe } = require("../../models/RecipeModels/recipeModel");
+const { User } = require("../../models/UserModels/userModel");
 const NotificationService = require("../../services/notificationService");
 const { hasRole } = require("../../middlewares/authMiddleware");
 const { generateTranslationKey } = require("../../utils/translationKey");
@@ -437,6 +439,148 @@ const unclapRecipe = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Acquire edit lock on a recipe
+// @route   POST /api/recipes/recipe/:id/lock
+// @access  Private
+const acquireEditLock = asyncHandler(async (req, res) => {
+  const LOCK_TIMEOUT_MS = 30 * 1000; // 30 seconds — heartbeat renews every 10s
+  const recipeId = req.params.id;
+  const userId = req.user._id;
+  const userName = req.user.firstName
+    ? `${req.user.firstName} ${req.user.lastName || ""}`.trim()
+    : req.user.username || "Someone";
+
+  // Atomic: only acquire if unlocked, expired, or same user
+  const result = await Recipe.findOneAndUpdate(
+    {
+      _id: recipeId,
+      $or: [
+        { "editLock.lockedBy": null },
+        { "editLock.lockedBy": userId },
+        { "editLock.lockedAt": { $lt: new Date(Date.now() - LOCK_TIMEOUT_MS) } },
+      ],
+    },
+    {
+      $set: {
+        "editLock.lockedBy": userId,
+        "editLock.lockedByName": userName,
+        "editLock.lockedAt": new Date(),
+      },
+    },
+    { new: true }
+  );
+
+  if (result) {
+    return res.status(200).json({
+      locked: true,
+      expiresAt: new Date(result.editLock.lockedAt.getTime() + LOCK_TIMEOUT_MS),
+    });
+  }
+
+  // Lock held by someone else — fetch to report who
+  const recipe = await Recipe.findById(recipeId).select("editLock").lean();
+  if (!recipe) {
+    return res.status(404).json({ message: "Recipe not found" });
+  }
+
+  return res.status(423).json({
+    error: "RECIPE_LOCKED",
+    lockedBy: recipe.editLock.lockedByName || "Someone",
+    lockedAt: recipe.editLock.lockedAt,
+  });
+});
+
+// @desc    Release edit lock on a recipe
+// @route   DELETE /api/recipes/recipe/:id/lock
+// @access  Private
+const releaseEditLock = asyncHandler(async (req, res) => {
+  const recipeId = req.params.id;
+  const userId = req.user._id;
+  const isAdmin = hasRole(req.user, "admin");
+
+  // Only the lock holder or an admin can release
+  const filter = { _id: recipeId };
+  if (!isAdmin) {
+    filter["editLock.lockedBy"] = userId;
+  }
+
+  await Recipe.findOneAndUpdate(filter, {
+    $set: {
+      "editLock.lockedBy": null,
+      "editLock.lockedByName": null,
+      "editLock.lockedAt": null,
+    },
+  });
+
+  res.status(200).json({ released: true });
+});
+
+// @desc    Renew (heartbeat) edit lock on a recipe
+// @route   PUT /api/recipes/recipe/:id/lock
+// @access  Private
+const renewEditLock = asyncHandler(async (req, res) => {
+  const recipeId = req.params.id;
+  const userId = req.user._id;
+
+  const result = await Recipe.findOneAndUpdate(
+    { _id: recipeId, "editLock.lockedBy": userId },
+    { $set: { "editLock.lockedAt": new Date() } },
+    { new: true }
+  );
+
+  if (!result) {
+    return res.status(403).json({ message: "You do not hold the lock on this recipe" });
+  }
+
+  const LOCK_TIMEOUT_MS = 30 * 1000;
+  res.status(200).json({
+    renewed: true,
+    expiresAt: new Date(result.editLock.lockedAt.getTime() + LOCK_TIMEOUT_MS),
+  });
+});
+
+// @desc    Release edit lock via sendBeacon (POST because sendBeacon only supports POST)
+// @route   POST /api/recipes/recipe/:id/unlock
+// NOTE: This route does NOT use protect middleware — it extracts the token from the body
+//       because sendBeacon cannot set Authorization headers.
+const releaseEditLockBeacon = asyncHandler(async (req, res) => {
+  const recipeId = req.params.id;
+  const token = req.body.token;
+
+  if (!token) {
+    return res.status(401).json({ message: "No token provided" });
+  }
+
+  let decoded;
+  try {
+    const rawToken = token.startsWith("Bearer ") ? token.split(" ")[1] : token;
+    decoded = jwt.verify(rawToken, process.env.JWT_SECRET);
+  } catch (err) {
+    return res.status(401).json({ message: "Invalid token" });
+  }
+
+  const user = await User.findById(decoded.id).select("roles");
+  if (!user) {
+    return res.status(401).json({ message: "User not found" });
+  }
+
+  const isAdmin = hasRole(user, "admin");
+  const filter = { _id: recipeId };
+  if (!isAdmin) {
+    filter["editLock.lockedBy"] = user._id;
+  }
+
+  await Recipe.findOneAndUpdate(filter, {
+    $set: {
+      "editLock.lockedBy": null,
+      "editLock.lockedByName": null,
+      "editLock.lockedAt": null,
+    },
+  });
+
+  res.status(200).json({ released: true });
+});
+
 module.exports = {
   createRecipe,
   getRecipeById,
@@ -451,4 +595,8 @@ module.exports = {
   getRecipeByTranslationKey,
   clapRecipe,
   unclapRecipe,
+  acquireEditLock,
+  releaseEditLock,
+  renewEditLock,
+  releaseEditLockBeacon,
 };

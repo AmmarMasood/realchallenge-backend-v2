@@ -14,6 +14,10 @@ const {
   getRecipeByTranslationKey,
   clapRecipe,
   unclapRecipe,
+  acquireEditLock,
+  releaseEditLock,
+  renewEditLock,
+  releaseEditLockBeacon,
 } = require("../../controllers/RecipeControllers/recipeController");
 
 router.get("/translations/:translationKey", getTranslationsByKey);
@@ -28,5 +32,9 @@ router.delete("/:recipeId", deleteRecipe);
 router.post("/:recipeId/comments", protect, createRecipeComment);
 router.put("/:id/clap", protect, clapRecipe);
 router.put("/:id/unclap", protect, unclapRecipe);
+router.post("/:id/lock", protect, acquireEditLock);
+router.put("/:id/lock", protect, renewEditLock);
+router.delete("/:id/lock", protect, releaseEditLock);
+router.post("/:id/unlock", releaseEditLockBeacon);
 
 module.exports = router;

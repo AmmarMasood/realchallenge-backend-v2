@@ -27,7 +27,7 @@ const {
 // Path to locale files (adjust if needed)
 const LOCALES_PATH = path.join(
   __dirname,
-  "../../realchallenge-frontend-updated/src/locales"
+  "../../realchallenge-frontend-v2/src/locales",
 );
 
 /**
@@ -129,7 +129,7 @@ async function migrateTranslations() {
               upsert: true,
               new: true,
               setDefaultsOnInsert: true,
-            }
+            },
           );
 
           if (result.createdAt.getTime() === result.updatedAt.getTime()) {
