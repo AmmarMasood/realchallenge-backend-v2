@@ -168,13 +168,13 @@ exports.getUserNotifications = async (req, res) => {
     const userCreationDate = await User.findById(userId).select("createdAt");
 
     // Build query for notifications
+    // Both broadcast and personal notifications are filtered to only show
+    // ones created after the user signed up
     const query = {
+      createdAt: { $gte: userCreationDate.createdAt },
       $or: [
         { notificationType: "broadcast" },
-        {
-          notificationFor: userId,
-          createdAt: { $gte: userCreationDate.createdAt },
-        },
+        { notificationFor: userId },
       ],
     };
 
