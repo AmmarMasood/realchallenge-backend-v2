@@ -434,7 +434,7 @@ const getRecommendedChallenge = asyncHandler(async (req, res) => {
       if (challGoals.length > 0) {
         for (let goal of custGoals) {
           for (let cg of challGoals) {
-            if (goal === cg.name) {
+            if (goal === cg) {
               recommendedchallenge.push(chall);
               isFound = true;
               break;
