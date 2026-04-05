@@ -17,6 +17,10 @@ const {
   addFreeChallenge,
   getUserPoints,
   availUserPoints,
+  getPhotoUploadUrl,
+  addToShoppingCart,
+  removeFromShoppingCart,
+  getShoppingCart,
 } = require("../../controllers/UserControllers/customerDetailsController");
 const {
   protect,
@@ -26,6 +30,7 @@ const {
 
 // TODO FIX THE PROTECTION OF ROUTES
 router.post("/create", protect, createCustomer);
+router.post("/photo-upload", protect, getPhotoUploadUrl);
 router.get("/all", protect, getAllCustomers);
 router.get(
   "/recommendedChallenges/:customerId",
@@ -67,6 +72,10 @@ router.put(
 
   updateChallengeProgress
 );
+
+router.get("/shoppingCart/:customerId", protect, getShoppingCart);
+router.put("/shoppingCart/:customerId", protect, addToShoppingCart);
+router.put("/removeShoppingCart/:customerId", protect, removeFromShoppingCart);
 
 router.get("/points/get-points", protect, getUserPoints);
 router.post("/points/redeem", protect, availUserPoints);

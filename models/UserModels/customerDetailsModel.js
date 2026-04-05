@@ -158,6 +158,12 @@ const customerDetailsSchema = mongoose.Schema(
         // unique: true,
       },
     ],
+    shoppingCart: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Recipe",
+      },
+    ],
   },
   {
     timestamps: true,

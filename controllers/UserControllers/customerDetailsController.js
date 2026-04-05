@@ -14,6 +14,8 @@ const {
 } = require("../../models/ChallengeModels/challengeGoalsModel");
 const { IdentityStore } = require("aws-sdk");
 const NotificationService = require("../../services/notificationService");
+const { v4: uuidv4 } = require("uuid");
+const { getPresignedPutUrl, getCloudFrontUrl } = require("../../config/s3");
 
 // @desc    Create Customer role by ID
 // @route   POST /api/customer/create
@@ -106,6 +108,10 @@ const getCustomerById = asyncHandler(async (req, res) => {
         },
         {
           path: "myDiet",
+        },
+        {
+          path: "supplementIntake.recipes",
+          model: "Recipe",
         },
       ],
     });
@@ -317,6 +323,89 @@ const unfavouriteRecipe = asyncHandler(async (req, res) => {
     return res.status(200).json({
       message: "recipe unfavourited",
       favouriteRecipes: user.customerDetails.favouriteRecipes,
+    });
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).send("Server Error");
+  }
+});
+
+// @desc    Add recipe to shopping cart
+// @route   PUT /api/customerDetails/shoppingCart/:customerId
+const addToShoppingCart = asyncHandler(async (req, res) => {
+  try {
+    const user = await User.findById(req.params.customerId).populate(
+      "customerDetails"
+    );
+    const recipeId = req.body.recipeId;
+
+    if (
+      user.customerDetails.shoppingCart
+        .map((id) => id.toString())
+        .includes(recipeId)
+    ) {
+      return res.status(400).json({ message: "Recipe already in shopping cart" });
+    }
+
+    user.customerDetails.shoppingCart.push(recipeId);
+    await user.customerDetails.save();
+
+    return res.status(200).json({
+      message: "Recipe added to shopping cart",
+      shoppingCart: user.customerDetails.shoppingCart,
+    });
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).send("Server Error");
+  }
+});
+
+// @desc    Remove recipe from shopping cart
+// @route   PUT /api/customerDetails/removeShoppingCart/:customerId
+const removeFromShoppingCart = asyncHandler(async (req, res) => {
+  try {
+    const user = await User.findById(req.params.customerId).populate(
+      "customerDetails"
+    );
+    const recipeId = req.body.recipeId;
+
+    const removeIndex = user.customerDetails.shoppingCart
+      .map((id) => id.toString())
+      .indexOf(recipeId);
+
+    if (removeIndex === -1) {
+      return res.status(400).json({ message: "Recipe not in shopping cart" });
+    }
+
+    user.customerDetails.shoppingCart.splice(removeIndex, 1);
+    await user.customerDetails.save();
+
+    return res.status(200).json({
+      message: "Recipe removed from shopping cart",
+      shoppingCart: user.customerDetails.shoppingCart,
+    });
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).send("Server Error");
+  }
+});
+
+// @desc    Get shopping cart
+// @route   GET /api/customerDetails/shoppingCart/:customerId
+const getShoppingCart = asyncHandler(async (req, res) => {
+  try {
+    const user = await User.findById(req.params.customerId).populate({
+      path: "customerDetails",
+      populate: {
+        path: "shoppingCart",
+        model: "Recipe",
+        populate: { path: "ingredients.name", model: "Ingredient" },
+      },
+    });
+
+    return res.status(200).json({
+      message: "Shopping cart fetched",
+      shoppingCart: user.customerDetails.shoppingCart,
     });
   } catch (error) {
     console.error(error.message);
@@ -1121,6 +1210,28 @@ const availUserPoints = asyncHandler(async (req, res, next) => {
   }
 });
 
+// @desc    Get a presigned S3 URL for user photo upload (no DB record)
+// @route   POST /api/customerDetails/photo-upload
+// @access  Private
+const getPhotoUploadUrl = asyncHandler(async (req, res) => {
+  const { filename, mimeType } = req.body;
+
+  if (!filename || !mimeType) {
+    return res.status(400).json({ message: "filename and mimeType are required" });
+  }
+
+  if (!mimeType.startsWith("image/")) {
+    return res.status(400).json({ message: "Only image files are allowed" });
+  }
+
+  const ext = filename.split(".").pop();
+  const s3Key = `user-photos/${uuidv4()}.${ext}`;
+  const presignedUrl = await getPresignedPutUrl(s3Key, mimeType);
+  const fileUrl = getCloudFrontUrl(s3Key);
+
+  res.status(200).json({ presignedUrl, fileUrl });
+});
+
 module.exports = {
   swapRecipe,
   createCustomer,
@@ -1138,4 +1249,8 @@ module.exports = {
   addFreeChallenge,
   getUserPoints,
   availUserPoints,
+  getPhotoUploadUrl,
+  addToShoppingCart,
+  removeFromShoppingCart,
+  getShoppingCart,
 };
