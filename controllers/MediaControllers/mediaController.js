@@ -13,6 +13,7 @@ const path = require("path");
 const ThumbnailService = require("../../services/thumbnailService");
 const VideoOptimizationService = require("../../services/videoOptimizationService");
 const mediaConvertService = require("../../services/mediaConvertService");
+const imageOptimizationService = require("../../services/imageOptimizationService");
 const {
   sendProgressUpdate,
   sendUploadComplete,
@@ -490,6 +491,18 @@ const uploadMediaFile = asyncHandler(async (req, res, next) => {
         await mediaFile.save();
       }
     })();
+  } else if (imageOptimizationService.isOptimizableImage(file.mimetype)) {
+    // Fire-and-forget: sharp-based image optimization (in-place overwrite, same URL)
+    const s3Key = `${folderId}/${finalFile.filename}`;
+    imageOptimizationService
+      .optimizeImageInPlace({
+        s3Key,
+        fileId: mediaFile._id.toString(),
+        mimetype: file.mimetype,
+      })
+      .catch((err) =>
+        console.error("[ImageOpt] Unhandled error:", err.message)
+      );
   }
 });
 
@@ -770,6 +783,17 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
           await mediaFile.save();
         }
       })();
+    } else if (imageOptimizationService.isOptimizableImage(file.mimetype)) {
+      const s3KeyForImg = `${folderId}/${finalFile.filename}`;
+      imageOptimizationService
+        .optimizeImageInPlace({
+          s3Key: s3KeyForImg,
+          fileId: mediaFile._id.toString(),
+          mimetype: file.mimetype,
+        })
+        .catch((err) =>
+          console.error("[ImageOpt] Unhandled error:", err.message)
+        );
     }
   } catch (error) {
     console.error("Upload error:", error);
@@ -1559,6 +1583,19 @@ const confirmUpload = asyncHandler(async (req, res) => {
         console.error("[ThumbnailLambda] Failed to invoke:", err.message);
       }
     })();
+  } else if (imageOptimizationService.isOptimizableImage(mimeType)) {
+    // Fire-and-forget: sharp-based image optimization (in-place overwrite, same URL)
+    mediaFile.originalSize = fileSize;
+    await mediaFile.save();
+    imageOptimizationService
+      .optimizeImageInPlace({
+        s3Key,
+        fileId: mediaFile._id.toString(),
+        mimetype: mimeType,
+      })
+      .catch((err) =>
+        console.error("[ImageOpt] Unhandled error:", err.message)
+      );
   }
 });
 
@@ -1594,7 +1631,7 @@ const thumbnailCallback = asyncHandler(async (req, res) => {
   res.status(200).json({ message: "Callback received (thumbnail failed)" });
 });
 
-// @desc    Retry video optimization for a failed file
+// @desc    Retry optimization for a failed file (video → MediaConvert, image → sharp)
 // @route   POST /api/media/retry-optimization/:fileId
 // @access  Private
 const retryOptimization = asyncHandler(async (req, res) => {
@@ -1610,6 +1647,30 @@ const retryOptimization = asyncHandler(async (req, res) => {
 
   const folderId = mediaFile.folderId.toString();
   const s3Key = `${folderId}/${mediaFile.filename}`;
+
+  // Infer image mimetype from filename extension for the picture path
+  const ext = (mediaFile.filename.split(".").pop() || "").toLowerCase();
+  const imageMimeByExt = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+  };
+  const inferredMime = imageMimeByExt[ext];
+
+  if (mediaFile.mediaType === "picture" && inferredMime) {
+    res.status(200).json({ message: "Image optimization retry started" });
+    imageOptimizationService
+      .optimizeImageInPlace({
+        s3Key,
+        fileId: mediaFile._id.toString(),
+        mimetype: inferredMime,
+      })
+      .catch((err) =>
+        console.error("[ImageOpt] Retry unhandled error:", err.message)
+      );
+    return;
+  }
 
   try {
     const jobId = await mediaConvertService.createTranscodeJob(
