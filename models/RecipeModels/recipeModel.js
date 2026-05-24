@@ -114,6 +114,10 @@ const recipeSchema = mongoose.Schema(
         pieces: { type: Number },
         method: { type: String },
         other: { type: String },
+        // Shopping-list controls (client 2026-05-16). Defaults: not
+        // optional, included in the shopping list by default.
+        isOptional: { type: Boolean, default: false },
+        includeInShoppingListByDefault: { type: Boolean, default: true },
       },
     ],
     cookingProcess: [
@@ -139,6 +143,13 @@ const recipeSchema = mongoose.Schema(
       default: false,
     },
     isPublic: {
+      type: Boolean,
+      default: false,
+    },
+    // Supplement recipes are their own category: excluded from normal
+    // Breakfast/Lunch/Dinner generation, but still browsable/filterable
+    // in the general recipe explore layer (client 2026-05-16).
+    isSupplement: {
       type: Boolean,
       default: false,
     },

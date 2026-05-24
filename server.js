@@ -23,6 +23,7 @@ const workoutRouter = require("./routes/ChallengesRoutes/workoutRoutes");
 const trainerRouter = require("./routes/UserRoutes/trainerRoutes");
 const creatorRouter = require("./routes/UserRoutes/creatorRoutes");
 const customerDetailsRouter = require("./routes/UserRoutes/customerDetailsRoutes");
+const mealPlanRouter = require("./routes/UserRoutes/mealPlanRoutes");
 const musicRouter = require("./routes/ChallengesRoutes/musicRoutes");
 const exerciseRouter = require("./routes/ChallengesRoutes/exerciseRoutes");
 const recipeRouter = require("./routes/RecipeRoutes/recipeRoutes");
@@ -74,6 +75,7 @@ app.use("/api/admin/requests", adminRequestRouter);
 app.use("/api/trainers", trainerRouter);
 app.use("/api/creator", creatorRouter);
 app.use("/api/customerDetails", customerDetailsRouter);
+app.use("/api/meal-plan", mealPlanRouter);
 app.use("/api/musics", musicRouter);
 app.use("/api/exercise", exerciseRouter);
 app.use("/api/recipes/recipe", recipeRouter);
@@ -121,6 +123,12 @@ app.listen(PORT, () => {
   console.log(
     `Server is running in ${process.env.NODE_ENV} mode on port ${PORT}`
   );
+
+  // Per-user weekly plan transition (env-gated; off by default)
+  const {
+    startWeekTransitionScheduler,
+  } = require("./services/mealPlanScheduler");
+  startWeekTransitionScheduler();
 
   // MediaConvert polling — check job status every 30 seconds
   const {

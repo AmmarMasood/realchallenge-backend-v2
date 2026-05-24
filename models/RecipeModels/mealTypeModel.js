@@ -1,19 +1,26 @@
 const mongoose = require("mongoose");
-const { languages } = require("../../utils/language");
+
+// MealType is a fixed slot-key vocabulary — admins cannot create new values.
+// Frontend translates these keys for display via i18n (e.g. userDashboard.nutrient.breakfast).
+const MEAL_TYPE_SLOTS = [
+  "breakfast",
+  "morningSnack",
+  "lunch",
+  "afternoonSnack",
+  "dinner",
+];
 
 const mealTypeSchema = mongoose.Schema(
   {
     name: {
       type: String,
-    },
-    language: {
-      type: String,
-      enum: languages,
+      enum: MEAL_TYPE_SLOTS,
+      required: true,
+      unique: true,
     },
   },
   { timestamps: true }
 );
 
-mealTypeSchema.index({ name: 1, language: 1 }, { unique: true });
-
 exports.MealType = mongoose.model("MealType", mealTypeSchema);
+exports.MEAL_TYPE_SLOTS = MEAL_TYPE_SLOTS;

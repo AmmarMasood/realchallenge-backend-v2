@@ -1,35 +1,37 @@
 const asyncHandler = require("express-async-handler");
 const { validationResult } = require("express-validator");
-const { MealType } = require("../../models/RecipeModels/mealTypeModel");
+const { MealType, MEAL_TYPE_SLOTS } = require("../../models/RecipeModels/mealTypeModel");
 
-// @desc    Create MealType
+// Idempotently ensure all canonical slot docs exist. Cheap to call.
+async function ensureCanonicalMealTypes() {
+  const existing = await MealType.find({}).select("name").lean();
+  const present = new Set(existing.map((m) => m.name));
+  const missing = MEAL_TYPE_SLOTS.filter((s) => !present.has(s));
+  if (missing.length === 0) return;
+  await MealType.insertMany(missing.map((name) => ({ name })));
+}
+
+// @desc    Create (or fetch) a canonical MealType slot. Idempotent.
 // @route   POST /api/recipes/mealType/create
 const createMealType = asyncHandler(async (req, res, next) => {
-  if (Object.keys(req.body).length === 0) {
-    return res.status(500).json("Body fields cannot be empty.");
-  }
   try {
-    const errors = validationResult(req); // Finds the validation errors in this request and wraps them in an object with handy functions
-
+    const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      res.status(422).json({ errors: errors.array() });
-      return;
+      return res.status(422).json({ errors: errors.array() });
     }
-    console.log(req.body);
-    let newMealType = new MealType({
-      name: req.body.name,
-      language: req.body.language,
-    });
-
-    newMealType = await newMealType.save();
-    if (!newMealType) {
-      return res.status(400).json("Meal Type cannot be created!");
-    } else {
-      return res.status(201).json({
-        mesage: "Meal Type Created Successfully",
-        newMealType,
+    const name = req.body && req.body.name;
+    if (!MEAL_TYPE_SLOTS.includes(name)) {
+      return res.status(400).json({
+        message: "Meal Type name must be one of the fixed slot keys",
+        allowed: MEAL_TYPE_SLOTS,
       });
     }
+    let mealType = await MealType.findOne({ name });
+    if (!mealType) mealType = await MealType.create({ name });
+    return res.status(201).json({
+      mesage: "Meal Type Ready",
+      newMealType: mealType,
+    });
   } catch (err) {
     return next(err);
   }
@@ -48,58 +50,28 @@ const getMealTypeById = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Get All MealTypes
+// @desc    Get All MealTypes (lazy-seeds the 5 canonical slots if missing).
 // @route   GET /api/recipes/mealType/
 const getAllMealTypes = asyncHandler(async (req, res) => {
-  let mealTypes;
-
-  if (req.query.language && req.query.language.length > 0) {
-    mealTypes = await MealType.find({ language: req.query.language });
-  } else {
-    mealTypes = await MealType.find({});
-  }
-
-  if (mealTypes) {
-    res.status(200).json({
-      mealTypes,
-    });
-  } else {
-    res.status(404);
-    throw new Error("Body Cannot be fetched");
-  }
+  await ensureCanonicalMealTypes();
+  const mealTypes = await MealType.find({});
+  res.status(200).json({ mealTypes });
 });
 
-// @desc    Update MealType by Id
-// @route   PUT /api/recipes/mealType/:mealTypeId
-const updateMealType = asyncHandler(async (req, res, next) => {
-  try {
-    const update = req.body;
-    const mealTypeId = req.params.mealTypeId;
-    await MealType.findByIdAndUpdate(mealTypeId, update, {
-      useFindAndModify: false,
-    });
-    const mealType = await MealType.findById(mealTypeId);
-    res.status(200).json({
-      data: mealType,
-      message: "Meal Type has been updated",
-    });
-  } catch (error) {
-    next(error);
-  }
+// MealType slot keys are a fixed enum — renaming or deleting them would
+// break recipe references. Both endpoints are intentionally disabled.
+const updateMealType = asyncHandler(async (req, res) => {
+  res.status(405).json({
+    message:
+      "Meal Type slots are fixed and cannot be renamed. Update the MEAL_TYPE_SLOTS enum to add a slot.",
+  });
 });
 
-// @desc    Delete MealType
-// @route   Delete /api/recipes/mealType/:mealTypeId
 const deleteMealType = asyncHandler(async (req, res) => {
-  const mealType = await MealType.findById(req.params.mealTypeId);
-
-  if (mealType) {
-    await mealType.remove();
-    res.json({ message: "Meal Type removed" });
-  } else {
-    res.status(404);
-    throw new Error("Meal Type not found");
-  }
+  res.status(405).json({
+    message:
+      "Meal Type slots are fixed and cannot be deleted. Update the MEAL_TYPE_SLOTS enum to remove a slot.",
+  });
 });
 
 module.exports = {

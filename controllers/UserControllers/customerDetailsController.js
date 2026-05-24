@@ -16,6 +16,7 @@ const { IdentityStore } = require("aws-sdk");
 const NotificationService = require("../../services/notificationService");
 const { v4: uuidv4 } = require("uuid");
 const { getPresignedPutUrl, getCloudFrontUrl } = require("../../config/s3");
+const { normalizeSupplementOption } = require("../../services/mealPlanService");
 
 // @desc    Create Customer role by ID
 // @route   POST /api/customer/create
@@ -198,6 +199,27 @@ const updateCustomer = asyncHandler(async (req, res, next) => {
       const customer = await User.findById(customerId)
         .populate("customerDetails")
         .select("-passwordHash");
+
+      // Spec: both This/Next week plans should exist as soon as the
+      // nutrition profile is set (client 2026-05-16). Idempotent + fire-
+      // and-forget so it never blocks or breaks the settings save (a
+      // lazy build on first plan fetch remains the fallback).
+      if (
+        customer &&
+        customer.customerDetails &&
+        customer.customerDetails.caloriesPerDay
+      ) {
+        const {
+          ensurePlansAtSignup,
+        } = require("../../services/mealPlanLifecycle");
+        ensurePlansAtSignup(
+          customer._id,
+          customer.customerDetails._id,
+          customer.timeZone
+        ).catch((e) =>
+          console.error("[ensurePlansAtSignup]", e.message)
+        );
+      }
 
       return res.status(200).json({
         data: customer,
@@ -593,7 +615,15 @@ const recommendedWeeklyDiet = asyncHandler(async (req, res, next) => {
     let dinnerRecipes = [];
     let snackRecipes = [];
 
-    const recipes = await Recipe.find()
+    const recipeFilter = {
+      isPublic: true,
+      adminApproved: true,
+      isSupplement: { $ne: true },
+    };
+    if (req.query.language) {
+      recipeFilter.language = req.query.language;
+    }
+    const recipes = await Recipe.find(recipeFilter)
       .populate("ingredients.name")
       .populate({ path: "diet", model: "Diet", select: "name -_id" })
       .populate({ path: "mealTypes", model: "MealType", select: "name -_id" });
@@ -613,20 +643,16 @@ const recommendedWeeklyDiet = asyncHandler(async (req, res, next) => {
             break;
           }
         }
+        // Slot bucketing is driven by MealType, which is now a fixed enum
+        // ("breakfast" | "morningSnack" | "lunch" | "afternoonSnack" | "dinner").
+        // FoodType remains free-form for category labels and is unused here.
         if (isFound) {
-          for (let meal of recipe.mealTypes) {
-            if (meal.name == "breakfast") {
-              breakfastRecipes.push(recipe);
-            }
-            if (meal.name == "lunch") {
-              lunchRecipes.push(recipe);
-            }
-            if (meal.name == "dinner") {
-              dinnerRecipes.push(recipe);
-            }
-            if (meal.name == "snack") {
-              snackRecipes.push(recipe);
-            }
+          for (let mt of recipe.mealTypes || []) {
+            const slot = mt && mt.name;
+            if (slot === "breakfast")      { breakfastRecipes.push(recipe); }
+            else if (slot === "morningSnack" || slot === "afternoonSnack") { snackRecipes.push(recipe); }
+            else if (slot === "lunch")     { lunchRecipes.push(recipe); }
+            else if (slot === "dinner")    { dinnerRecipes.push(recipe); }
           }
         }
       }
@@ -642,17 +668,13 @@ const recommendedWeeklyDiet = asyncHandler(async (req, res, next) => {
         //add supplement meals
         let dayMealCount = 0;
         let extraMealCount = 0;
-        let dayMeal = false;
-        let extraMeal = false;
-        let noMeal = false;
-        if (supplements.supplementOption == "During the day") {
-          dayMeal = true;
-        } else if (supplements.supplementOption == "Add as an extra meal") {
-          extraMeal = true;
-        } else {
-          noMeal = true;
-        }
-        if (supplements.supplementOption != "None") {
+        const suppMode = normalizeSupplementOption(
+          supplements.supplementOption
+        );
+        const dayMeal = suppMode === "during_day";
+        const extraMeal = suppMode === "extra_meal";
+        const noMeal = suppMode === "none";
+        if (suppMode !== "none") {
           for (let recipe of supplements.recipes) {
             caloriesPerDay -= recipe.kCalPerPerson;
             fatPerDay -= recipe.fat * 0.09;

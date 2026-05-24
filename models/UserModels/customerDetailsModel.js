@@ -101,11 +101,33 @@ const customerDetailsSchema = mongoose.Schema(
     currentCondition: {
       type: String,
     },
+    // Late Meal is its own meal-structure setting and coexists with any
+    // supplement mode (client 2026-05-16). Read by the planner generator.
+    lateMeal: {
+      type: Boolean,
+      default: false,
+    },
     supplementIntake: {
+      // Mutually exclusive: none | during-the-day (Fuel Moment) |
+      // extra-meal. Fuel Moment & extra-meal cannot coexist.
       supplementOption: {
         type: String,
       },
       recipes: [{ type: mongoose.Schema.Types.ObjectId, ref: "Recipe" }],
+      // Fuel Moment replaces a snack the USER chooses — not hardcoded.
+      fuelMomentSlot: {
+        type: String,
+        enum: ["morningSnack", "afternoonSnack", null],
+        default: null,
+      },
+      // Per-supplement day scheduling (NOT one global set).
+      schedule: [
+        {
+          recipe: { type: mongoose.Schema.Types.ObjectId, ref: "Recipe" },
+          everyDay: { type: Boolean, default: true },
+          days: [{ type: String }], // weekday keys when !everyDay
+        },
+      ],
     },
 
     myDiet: [

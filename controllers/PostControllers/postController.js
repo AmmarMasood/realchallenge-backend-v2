@@ -109,6 +109,18 @@ const getAllPosts = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Check whether a post already exists for a given url (used by
+//          admin tools to disable "Create Post" once one has been made
+//          for a given challenge / recipe).
+// @route   GET /api/posts/exists?url=/challenge/slug/id
+// @access  Private (any logged-in user)
+const postExistsByUrl = asyncHandler(async (req, res) => {
+  const url = req.query && req.query.url;
+  if (!url) return res.status(400).json({ message: "url required" });
+  const post = await Post.findOne({ url }).select("_id").lean();
+  res.status(200).json({ exists: !!post, postId: post ? post._id : null });
+});
+
 // @desc    Get Post by ID
 // @route   GET /api/posts/:id
 const getPostById = asyncHandler(async (req, res) => {
@@ -330,6 +342,7 @@ module.exports = {
   createPost,
   getAllPosts,
   getPostById,
+  postExistsByUrl,
   deletePost,
   updatePost,
   likePost,

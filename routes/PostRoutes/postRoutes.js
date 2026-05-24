@@ -5,6 +5,7 @@ const {
   createPost,
   getAllPosts,
   getPostById,
+  postExistsByUrl,
   deletePost,
   likePost,
   unlikePost,
@@ -21,6 +22,7 @@ const {
 
 router.post("/create", allowAllExceptCustomer, createPost);
 router.get("/all", protect, getAllPosts);
+router.get("/exists", protect, postExistsByUrl);
 
 router.get("/:id", protect, getPostById);
 

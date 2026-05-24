@@ -1094,7 +1094,23 @@ const updateUserRoles = asyncHandler(async (req, res, next) => {
   }
 });
 
+// @desc    Silently persist the user's browser-detected timezone
+// @route   PUT /api/users/timezone
+// @access  Private
+const setTimeZone = asyncHandler(async (req, res) => {
+  const { resolveTimeZone } = require("../../utils/weekTime");
+  const tz = req.body && req.body.timeZone;
+  // Only store a valid IANA zone; invalid input is a no-op (GMT fallback
+  // happens at read time anyway).
+  if (!tz || resolveTimeZone(tz) !== tz) {
+    return res.status(400).json({ message: "Invalid or missing timeZone" });
+  }
+  await User.updateOne({ _id: req.user._id }, { $set: { timeZone: tz } });
+  res.status(200).json({ timeZone: tz });
+});
+
 module.exports = {
+  setTimeZone,
   authUser,
   registerUser,
   getUserById,

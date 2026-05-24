@@ -109,6 +109,12 @@ const userSchema = mongoose.Schema(
       type: String,
       required: false,
     },
+    // IANA zone (e.g. "Europe/Amsterdam"). All week/"today" logic resolves
+    // through utils/weekTime, which falls back to GMT when this is empty.
+    timeZone: {
+      type: String,
+      required: false,
+    },
     customerDetails: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "CustomerDetails",
