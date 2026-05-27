@@ -11,6 +11,9 @@ const {
   setFavouriteRecipe,
   unfavouriteRecipe,
   getAllFavouriteRecipes,
+  setFavouriteChallenge,
+  unfavouriteChallenge,
+  getAllFavouriteChallenges,
   updateChallengeProgress,
   getChallengeProgress,
   replaceFreeChallenge,
@@ -64,6 +67,22 @@ router.put(
   protect,
 
   unfavouriteRecipe
+);
+
+router.get(
+  "/favouriteChallenge/:customerId",
+  protect,
+  getAllFavouriteChallenges
+);
+router.put(
+  "/favouriteChallenge/:customerId",
+  protect,
+  setFavouriteChallenge
+);
+router.put(
+  "/unfavouriteChallenge/:customerId",
+  protect,
+  unfavouriteChallenge
 );
 
 router.put(

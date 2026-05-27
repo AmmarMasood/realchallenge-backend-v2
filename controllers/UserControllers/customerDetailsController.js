@@ -352,6 +352,126 @@ const unfavouriteRecipe = asyncHandler(async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// Favourite Challenges — parallel to Favourite Recipes (above). Same shape,
+// same error semantics. Lives on customerDetails.favouriteChallenges.
+// ─────────────────────────────────────────────────────────────────────────
+
+// @desc    Get all favourite challenges
+// @route   GET /api/customerDetails/favouriteChallenge/:customerId
+// @access  Private/Customer
+const getAllFavouriteChallenges = asyncHandler(async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(422).json({ errors: errors.array() });
+      return;
+    }
+    const user = await User.findById(req.params.customerId).populate({
+      path: "customerDetails",
+      populate: [{ path: "favouriteChallenges" }],
+    });
+    const favChallenges =
+      (user && user.customerDetails && user.customerDetails.favouriteChallenges) || [];
+    if (favChallenges.length > 0) {
+      return res.status(200).json({
+        message: "Favourite challenges fetched successfully",
+        favChallenges,
+      });
+    }
+    return res
+      .status(400)
+      .json({ message: "Have not favourited any challenges yet" });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// @desc    Add a challenge to favourites
+// @route   PUT /api/customerDetails/favouriteChallenge/:customerId
+// @access  Private/Customer
+const setFavouriteChallenge = asyncHandler(async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(422).json({ errors: errors.array() });
+      return;
+    }
+    const favourite = req.body.challengeId;
+
+    // Don't let a trainer favourite their own challenge.
+    const challengeToFav = await Challenges.findById(favourite);
+    if (
+      challengeToFav &&
+      Array.isArray(challengeToFav.trainers) &&
+      challengeToFav.trainers
+        .map((t) => t.toString())
+        .includes(req.params.customerId)
+    ) {
+      return res
+        .status(403)
+        .json({ msg: "Cannot favourite your own challenge" });
+    }
+
+    const user = await User.findById(req.params.customerId).populate(
+      "customerDetails"
+    );
+    if (!user || !user.customerDetails) {
+      return res.status(400).json({ msg: "User profile not found" });
+    }
+    const favChallenges = user.customerDetails.favouriteChallenges || [];
+
+    if (
+      favChallenges.filter((id) => id.toString() === favourite.toString())
+        .length > 0
+    ) {
+      return res.status(400).json({ msg: "Challenge already favourited" });
+    }
+
+    if (user && favourite) {
+      favChallenges.push(favourite);
+      user.customerDetails.favouriteChallenges = favChallenges;
+      await user.customerDetails.save();
+      return res.status(200).json({
+        message: "Challenge favorited",
+        favouriteChallenges: favChallenges,
+      });
+    }
+    return res.status(400).json("no favourite challenge sent");
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// @desc    Remove a challenge from favourites
+// @route   PUT /api/customerDetails/unfavouriteChallenge/:customerId
+// @access  Private/Customer
+const unfavouriteChallenge = asyncHandler(async (req, res) => {
+  try {
+    const user = await User.findById(req.params.customerId).populate(
+      "customerDetails"
+    );
+    const unFavId = req.body.challengeId;
+
+    const removeIndex = (user.customerDetails.favouriteChallenges || [])
+      .map((id) => id.toString())
+      .indexOf(unFavId);
+
+    if (removeIndex >= 0) {
+      user.customerDetails.favouriteChallenges.splice(removeIndex, 1);
+      await user.customerDetails.save();
+    }
+
+    return res.status(200).json({
+      message: "challenge unfavourited",
+      favouriteChallenges: user.customerDetails.favouriteChallenges,
+    });
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).send("Server Error");
+  }
+});
+
 // @desc    Add recipe to shopping cart
 // @route   PUT /api/customerDetails/shoppingCart/:customerId
 const addToShoppingCart = asyncHandler(async (req, res) => {
@@ -1275,4 +1395,7 @@ module.exports = {
   addToShoppingCart,
   removeFromShoppingCart,
   getShoppingCart,
+  getAllFavouriteChallenges,
+  setFavouriteChallenge,
+  unfavouriteChallenge,
 };

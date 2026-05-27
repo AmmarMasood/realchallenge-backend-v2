@@ -142,18 +142,25 @@ const customerDetailsSchema = mongoose.Schema(
         ref: "Ingredient",
       },
     ],
+    // Body measurements track the user's progress month-by-month, same
+    // shape as `weight` above (12 slots, indexed 0=Jan … 11=Dec). The
+    // current-month slot is written on each Update Values save. Empty
+    // months stay at 0 so chart code can decide whether to plot them.
     shoulderSize: {
-      type: Number,
+      type: Array,
+      default: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     },
-
     waistSize: {
-      type: Number,
+      type: Array,
+      default: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     },
     hipSize: {
-      type: Number,
+      type: Array,
+      default: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     },
     chestSize: {
-      type: Number,
+      type: Array,
+      default: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     },
     beforeImageLink:
       //TODO
@@ -195,6 +202,14 @@ const customerDetailsSchema = mongoose.Schema(
         type: mongoose.Schema.Types.ObjectId,
         ref: "Recipe",
         // unique: true,
+      },
+    ],
+    // User-bookmarked challenges (parallel to favouriteRecipes). Independent
+    // of `challenges` (which tracks joined/owned challenges).
+    favouriteChallenges: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Challenges",
       },
     ],
     shoppingCart: [
