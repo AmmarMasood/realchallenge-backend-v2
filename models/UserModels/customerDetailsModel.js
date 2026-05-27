@@ -167,6 +167,23 @@ const customerDetailsSchema = mongoose.Schema(
         type: String,
       },
 
+    // Hides the user's before/after photos from the public challenges page.
+    // Default false to preserve current behavior for existing accounts.
+    hideMyShape: {
+      type: Boolean,
+      default: false,
+    },
+
+    // Selected trainer-goal interests (Bootcamp, Boxing, Strength, …).
+    // Originally captured in the signup wizard and previously dropped by
+    // Mongoose strict-mode because the field wasn't on the schema.
+    fitnessInterests: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "TrainerGoal",
+      },
+    ],
+
     membership: [
       {
         type: mongoose.Schema.Types.ObjectId,

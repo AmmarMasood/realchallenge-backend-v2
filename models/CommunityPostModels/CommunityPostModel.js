@@ -16,6 +16,14 @@ const communityPostModel = new mongoose.Schema({
   image: {
     type: String,
   },
+  // Deep-link target for the card click (e.g. /challenge/<slug>/<id>).
+  // Mongoose strict mode was silently dropping this for years — schema
+  // didn't include it, but the controller and create payload both write
+  // it. Adding it now so new posts (and any backfilled ones) actually
+  // navigate when clicked.
+  url: {
+    type: String,
+  },
   type: {
     type: String,
   },

@@ -22,6 +22,9 @@ function recipeToLineItems(recipe) {
   for (const ing of recipe.ingredients || []) {
     if (ing.includeInShoppingListByDefault === false) continue;
     if (!ing.name) continue;
+    // Pantry staples (salt/oil/etc.) are assumed on hand — keep them out
+    // of the derived shopping output. User can still add manually.
+    if (ing.name.isPantryStaple === true) continue;
     const itemId = ing.name._id || ing.name;
     const triples = [
       ["g", ing.weight],

@@ -19,6 +19,9 @@ const createIngredient = asyncHandler(async (req, res, next) => {
     let newIngredient = new Ingredient({
       name: req.body.name,
       language: req.body.language,
+      isPantryStaple: !!req.body.isPantryStaple,
+      category: req.body.category || "",
+      defaultUnit: req.body.defaultUnit || "",
     });
 
     newIngredient = await newIngredient.save();
