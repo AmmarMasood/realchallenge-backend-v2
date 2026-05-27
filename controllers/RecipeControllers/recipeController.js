@@ -90,14 +90,19 @@ const getRecipeById = asyncHandler(async (req, res) => {
 });
 
 // @desc    Get All Recipes
-// @route   GET /api/recipes/recipe?language=eng
+// @route   GET /api/recipes/recipe?language=eng[&supplementOnly=true]
 const getAllRecipes = asyncHandler(async (req, res) => {
-  const recipes = await Recipe.find({
+  const filter = {
     isPublic: true,
     adminApproved: true,
     language: req.query.language,
-  })
-    .populate("ingredients.name");
+  };
+  // Supplement-only callers (e.g., user-dashboard supplement picker) want
+  // just the supplement-flagged recipes. Defaults to all when omitted.
+  if (req.query.supplementOnly === "true") {
+    filter.isSupplement = true;
+  }
+  const recipes = await Recipe.find(filter).populate("ingredients.name");
   if (recipes) {
     res.status(200).json({
       recipes: recipes,
