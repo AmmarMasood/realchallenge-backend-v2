@@ -103,6 +103,15 @@ const recipeSchema = mongoose.Schema(
         ref: "Diet",
       },
     ],
+    // Allergens present in this recipe (nuts, dairy, gluten, …). Used to
+    // exclude the recipe for users whose allergies intersect these tags —
+    // the highest-priority generation/swap filter (spec §12/§26).
+    allergens: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Allergen",
+      },
+    ],
     ingredients: [
       {
         name: {

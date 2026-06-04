@@ -136,6 +136,16 @@ const customerDetailsSchema = mongoose.Schema(
         ref: "Diet",
       },
     ],
+    // The user's allergies / food exclusions, set in onboarding/settings
+    // (spec §11: owned by settings, highest-priority filter §12). Recipes
+    // whose `allergens` intersect this list are excluded from generation
+    // and swap, and pins referencing them are invalidated (§13).
+    allergies: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Allergen",
+      },
+    ],
     groceryList: [
       {
         type: mongoose.Schema.Types.ObjectId,

@@ -41,6 +41,7 @@ const createRecipe = asyncHandler(async (req, res, next) => {
       mealTypes: req.body.mealTypes,
       foodTypes: req.body.foodTypes,
       diet: req.body.diet,
+      allergens: req.body.allergens,
       ingredients: req.body.ingredients,
       cookingProcess: req.body.cookingProcess,
       notes: req.body.notes,

@@ -46,6 +46,7 @@ async function loadPlanInputs(customerUserId) {
       model: "CustomerDetails",
       populate: [
         { path: "myDiet", select: "name -_id" },
+        { path: "allergies", select: "name -_id" },
         {
           // _id is required to match per-supplement schedule entries.
           path: "supplementIntake.recipes",
@@ -56,15 +57,22 @@ async function loadPlanInputs(customerUserId) {
 }
 
 // A pinned recipe is usable only if it still exists, is public/approved,
-// is not a supplement, and matches the customer's diet (same rule as
-// generation's diet filter). Keeps gen + applyPins consistent.
-function pinnedRecipeUsable(recipe, dietNames) {
+// is not a supplement, matches the customer's diet, and contains none of
+// the customer's allergens (same rules as generation). Keeps gen +
+// applyPins + swap consistent. allergenNames is optional; when omitted, no
+// allergen exclusion is applied (back-compat for diet-only callers).
+function pinnedRecipeUsable(recipe, dietNames, allergenNames) {
   if (!recipe) return false;
   if (!recipe.isPublic || !recipe.adminApproved || recipe.isSupplement)
     return false;
   if (dietNames && dietNames.length) {
     const rd = (recipe.diet || []).map((d) => d && d.name);
     if (!dietNames.some((dn) => rd.includes(dn))) return false;
+  }
+  if (allergenNames && allergenNames.length) {
+    const ra = (recipe.allergens || []).map((a) => a && a.name);
+    // Exclude if the recipe carries ANY allergen the user must avoid.
+    if (ra.some((an) => allergenNames.includes(an))) return false;
   }
   return true;
 }
@@ -76,18 +84,31 @@ function pinnedRecipeUsable(recipe, dietNames) {
  * Only next_week; just_once honored only for its target week_id.
  * Day pins contribute every locked meal as a pinned slot.
  */
-async function resolvePinnedSlots(customerDetailsId, weekId, dietNames) {
+async function resolvePinnedSlots(customerDetailsId, weekId, dietNames, allergenNames) {
   const { PinnedRecipe } = require("../models/MealPlanModels/pinnedRecipeModel");
   const { PinnedDay } = require("../models/MealPlanModels/pinnedDayModel");
   const out = {};
   const applies = (p) =>
     p.mode === "always" || !p.target_week_id || p.target_week_id === weekId;
 
+  const pinPopulate = {
+    path: "recipe_id",
+    populate: [
+      { path: "diet", select: "name -_id" },
+      { path: "allergens", select: "name -_id" },
+    ],
+  };
   const [rPins, dPins] = await Promise.all([
     PinnedRecipe.find({ customer: customerDetailsId, disabled: false })
-      .populate({ path: "recipe_id", populate: { path: "diet", select: "name -_id" } }),
+      .populate(pinPopulate),
     PinnedDay.find({ customer: customerDetailsId, disabled: false })
-      .populate({ path: "locked_meals.recipe_id", populate: { path: "diet", select: "name -_id" } }),
+      .populate({
+        path: "locked_meals.recipe_id",
+        populate: [
+          { path: "diet", select: "name -_id" },
+          { path: "allergens", select: "name -_id" },
+        ],
+      }),
   ]);
 
   // Day pins win over recipe pins (spec §20) — seed them first.
@@ -95,7 +116,7 @@ async function resolvePinnedSlots(customerDetailsId, weekId, dietNames) {
     if (!applies(dp)) continue;
     for (const lm of dp.locked_meals || []) {
       const r = lm.recipe_id;
-      if (r && pinnedRecipeUsable(r, dietNames)) {
+      if (r && pinnedRecipeUsable(r, dietNames, allergenNames)) {
         out[dp.weekday] = out[dp.weekday] || {};
         out[dp.weekday][lm.meal_slot] = r;
       }
@@ -108,7 +129,7 @@ async function resolvePinnedSlots(customerDetailsId, weekId, dietNames) {
     .sort((a, b) => (a.mode === "always" ? -1 : 1) - (b.mode === "always" ? -1 : 1));
   for (const rp of ordered) {
     const r = rp.recipe_id;
-    if (!pinnedRecipeUsable(r, dietNames)) continue;
+    if (!pinnedRecipeUsable(r, dietNames, allergenNames)) continue;
     out[rp.weekday] = out[rp.weekday] || {};
     out[rp.weekday][rp.meal_slot] = r;
   }
@@ -129,6 +150,11 @@ async function generateDayPlans(customer, { language, pinnedSlots } = {}) {
     (cd.amountOfCarbohydrate / 100) * caloriesPerDay_final;
   const proteinPerDay_final = (cd.amountOfProtein / 100) * caloriesPerDay_final;
   const dietOptions = cd.myDiet || [];
+  // Allergens the user must avoid — the highest-priority filter (spec §12).
+  // A recipe carrying ANY of these is dropped before diet/macro bucketing.
+  const allergyNames = (cd.allergies || [])
+    .map((a) => a && a.name)
+    .filter(Boolean);
   const lateMeal = cd.lateMeal;
   const supplements = cd.supplementIntake || { supplementOption: "None", recipes: [] };
   // Fuel Moment replaces a user-chosen snack; legacy snack keys are
@@ -176,6 +202,7 @@ async function generateDayPlans(customer, { language, pinnedSlots } = {}) {
   const recipes = await Recipe.find(recipeFilter)
     .populate("ingredients.name")
     .populate({ path: "diet", model: "Diet", select: "name -_id" })
+    .populate({ path: "allergens", model: "Allergen", select: "name -_id" })
     .populate({ path: "mealTypes", model: "MealType", select: "name -_id" });
 
   const weeklyDietPlan = [];
@@ -188,6 +215,11 @@ async function generateDayPlans(customer, { language, pinnedSlots } = {}) {
 
   let isFound = false;
   for (const recipe of recipes) {
+    // Allergen exclusion runs first (spec §12: allergies > diet > macros).
+    if (allergyNames.length) {
+      const ra = (recipe.allergens || []).map((a) => a && a.name);
+      if (ra.some((an) => allergyNames.includes(an))) continue;
+    }
     for (const myDiet of dietOptions) {
       isFound = false;
       for (const diet of recipe.diet) {
@@ -379,10 +411,14 @@ async function buildWeekPlan({ customerUserId, customerDetailsId, type, status, 
     const dietNames = ((customer.customerDetails || {}).myDiet || []).map(
       (d) => d && d.name
     );
+    const allergenNames = ((customer.customerDetails || {}).allergies || [])
+      .map((a) => a && a.name)
+      .filter(Boolean);
     pinnedSlots = await resolvePinnedSlots(
       customerDetailsId,
       week_id,
-      dietNames
+      dietNames,
+      allergenNames
     );
   }
   const dayPlans = await generateDayPlans(customer, { language, pinnedSlots });
@@ -445,5 +481,6 @@ module.exports = {
   buildWeekPlan,
   upsertWeekPlan,
   dayPlanToMeals,
+  pinnedRecipeUsable,
   SLOT_KEY_MAP,
 };

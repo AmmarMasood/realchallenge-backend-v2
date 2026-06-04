@@ -5,7 +5,11 @@ const { WeekPlan } = require("../../models/MealPlanModels/weekPlanModel");
 const { PinnedRecipe } = require("../../models/MealPlanModels/pinnedRecipeModel");
 const { PinnedDay } = require("../../models/MealPlanModels/pinnedDayModel");
 const { CustomerDetails } = require("../../models/UserModels/customerDetailsModel");
-const { buildWeekPlan, upsertWeekPlan } = require("../../services/mealPlanService");
+const {
+  buildWeekPlan,
+  upsertWeekPlan,
+  pinnedRecipeUsable,
+} = require("../../services/mealPlanService");
 const { ShoppingList } = require("../../models/MealPlanModels/shoppingListModel");
 const shoppingService = require("../../services/shoppingService");
 const deliveryService = require("../../services/deliveryService");
@@ -113,9 +117,10 @@ const getNextWeek = asyncHandler(async (req, res) => {
 // Validate a recipe_id is still usable for this customer: exists, public,
 // approved, not a supplement, and diet-compatible (mirrors generation's
 // diet rule). dietNames = the customer's selected diet names.
-async function isRecipeValidForCustomer(recipeId, dietNames) {
+async function isRecipeValidForCustomer(recipeId, dietNames, allergenNames) {
   const r = await Recipe.findById(recipeId)
     .populate({ path: "diet", select: "name -_id" })
+    .populate({ path: "allergens", select: "name -_id" })
     .lean();
   if (!r) return false;
   if (!r.isPublic || !r.adminApproved || r.isSupplement) return false;
@@ -123,6 +128,11 @@ async function isRecipeValidForCustomer(recipeId, dietNames) {
     const rd = (r.diet || []).map((d) => d && d.name);
     // Customer must have at least one matching diet (same spirit as gen).
     if (!dietNames.some((dn) => rd.includes(dn))) return false;
+  }
+  if (allergenNames && allergenNames.length) {
+    const ra = (r.allergens || []).map((a) => a && a.name);
+    // Invalid if the recipe carries any allergen the user must avoid (§13).
+    if (ra.some((an) => allergenNames.includes(an))) return false;
   }
   return true;
 }
@@ -143,8 +153,12 @@ async function applyPins(ctx, plan) {
 
   const cd = await CustomerDetails.findById(ctx.customerDetailsId)
     .populate({ path: "myDiet", select: "name -_id" })
+    .populate({ path: "allergies", select: "name -_id" })
     .lean();
   const dietNames = ((cd && cd.myDiet) || []).map((d) => d && d.name);
+  const allergenNames = ((cd && cd.allergies) || [])
+    .map((a) => a && a.name)
+    .filter(Boolean);
 
   const [recipePins, dayPins] = await Promise.all([
     PinnedRecipe.find({ customer: ctx.customerDetailsId }),
@@ -178,7 +192,7 @@ async function applyPins(ctx, plan) {
     if (!day) continue;
     let allValid = true;
     for (const lm of dp.locked_meals || []) {
-      if (!(await isRecipeValidForCustomer(lm.recipe_id, dietNames))) {
+      if (!(await isRecipeValidForCustomer(lm.recipe_id, dietNames, allergenNames))) {
         allValid = false;
         break;
       }
@@ -211,9 +225,10 @@ async function applyPins(ctx, plan) {
   for (const rp of ordered) {
     const day = plan.days.find((d) => d.weekday === rp.weekday);
     if (!day || day.is_day_pinned) continue; // day pin wins
-    if (!(await isRecipeValidForCustomer(rp.recipe_id, dietNames))) {
+    if (!(await isRecipeValidForCustomer(rp.recipe_id, dietNames, allergenNames))) {
       rp.disabled = true;
-      rp.disabled_reason = "recipe deleted or no longer matches your diet";
+      rp.disabled_reason =
+        "recipe deleted or no longer matches your diet/allergies";
       await rp.save();
       invalidated.push({
         type: "recipe",
@@ -315,15 +330,35 @@ const swapMeal = asyncHandler(async (req, res) => {
     ? await Recipe.findById(slot.recipe_id)
     : null;
 
-  // Same slot, diet/public/approved respected; macro-closest alternative.
+  // The user's diet AND allergies must constrain swap candidates exactly as
+  // they do generation (spec §26: alternatives must respect allergies +
+  // diet). Without this a swap could hand a vegan/nut-allergic user a
+  // conflicting recipe.
+  const cd = await CustomerDetails.findById(ctx.customerDetailsId)
+    .populate({ path: "myDiet", select: "name -_id" })
+    .populate({ path: "allergies", select: "name -_id" })
+    .lean();
+  const dietNames = ((cd && cd.myDiet) || [])
+    .map((d) => d && d.name)
+    .filter(Boolean);
+  const allergenNames = ((cd && cd.allergies) || [])
+    .map((a) => a && a.name)
+    .filter(Boolean);
+
+  // Same slot, diet/allergies/public/approved respected; macro-closest.
   const candidates = await Recipe.find({
     isPublic: true,
     adminApproved: true,
     isSupplement: { $ne: true },
     _id: { $ne: slot.recipe_id },
-  }).populate({ path: "mealTypes", select: "name -_id" });
-  const inSlot = candidates.filter((r) =>
-    (r.mealTypes || []).some((mt) => mt.name === meal_slot)
+  })
+    .populate({ path: "mealTypes", select: "name -_id" })
+    .populate({ path: "diet", select: "name -_id" })
+    .populate({ path: "allergens", select: "name -_id" });
+  const inSlot = candidates.filter(
+    (r) =>
+      (r.mealTypes || []).some((mt) => mt.name === meal_slot) &&
+      pinnedRecipeUsable(r, dietNames, allergenNames)
   );
   if (!inSlot.length)
     return res.status(404).json({ message: "No alternative recipes for this slot" });
