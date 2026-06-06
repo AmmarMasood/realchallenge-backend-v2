@@ -7,6 +7,30 @@ const NotificationService = require("../../services/notificationService");
 const { hasRole } = require("../../middlewares/authMiddleware");
 const { generateTranslationKey } = require("../../utils/translationKey");
 
+// Each ingredient row must carry EXACTLY ONE active quantity unit
+// (g | ml | pieces) — client requirement: "exactly one active quantity per
+// row," guaranteed in the implementation, not just in the admin UI. This is
+// the data-layer guard so a bad API call / import / legacy record can't slip
+// a multi-unit row past us. Returns an error string, or null if all rows are
+// valid. A row with zero quantities is allowed (e.g. "to taste").
+function validateSingleUnitRows(ingredients) {
+  if (!Array.isArray(ingredients)) return null;
+  for (let i = 0; i < ingredients.length; i++) {
+    const ing = ingredients[i] || {};
+    const active = ["weight", "volume", "pieces"].filter(
+      (k) => Number(ing[k]) > 0
+    );
+    if (active.length > 1) {
+      const label =
+        (ing.name && (ing.name.name || ing.name)) || `row ${i + 1}`;
+      return `Ingredient "${label}" has more than one quantity unit set (${active.join(
+        ", "
+      )}). Each row may use only grams OR ml OR pieces.`;
+    }
+  }
+  return null;
+}
+
 // @desc    Create Recipe
 // @route   POST /api/recipes/recipe/create
 const createRecipe = asyncHandler(async (req, res, next) => {
@@ -19,6 +43,10 @@ const createRecipe = asyncHandler(async (req, res, next) => {
     if (!errors.isEmpty()) {
       res.status(422).json({ errors: errors.array() });
       return;
+    }
+    const unitError = validateSingleUnitRows(req.body.ingredients);
+    if (unitError) {
+      return res.status(400).json({ message: unitError });
     }
     // Generate or use provided translationKey
     const translationKey = req.body.translationKey ||
@@ -160,6 +188,14 @@ const getAllUserRecipes = asyncHandler(async (req, res) => {
 // @route   PUT /api/recipes/recipe/:recipeId
 const updateRecipe = asyncHandler(async (req, res, next) => {
   try {
+    // Guard the one-active-unit rule on update too (only when ingredients
+    // are part of this update payload).
+    if (req.body && req.body.ingredients) {
+      const unitError = validateSingleUnitRows(req.body.ingredients);
+      if (unitError) {
+        return res.status(400).json({ message: unitError });
+      }
+    }
     const update = { ...req.body, updatedBy: req.user._id };
     const recipeId = req.params.recipeId;
     if (hasRole(req.user, "admin")) {

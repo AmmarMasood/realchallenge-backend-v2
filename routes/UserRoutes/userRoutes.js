@@ -5,6 +5,7 @@ const {
 const router = express.Router();
 const {
   setTimeZone,
+  getTimeZone,
   authUser,
   registerUser,
   getUserProfile,
@@ -31,6 +32,7 @@ const { protect, admin } = require("../../middlewares/authMiddleware");
 
 // users/register/:social
 router.put("/timezone", protect, setTimeZone);
+router.get("/timezone", protect, getTimeZone);
 router.post("/register", registerUser);
 router.post("/register/:type", registerUserWithSocial);
 router.post("/login", authUser);

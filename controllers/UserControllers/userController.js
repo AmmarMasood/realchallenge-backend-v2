@@ -1105,12 +1105,32 @@ const setTimeZone = asyncHandler(async (req, res) => {
   if (!tz || resolveTimeZone(tz) !== tz) {
     return res.status(400).json({ message: "Invalid or missing timeZone" });
   }
+  // SET-ONCE (client decision): once a user has a valid timezone, it is
+  // immutable. This prevents the silent travel/multi-device overwrite that
+  // would shift "today", week boundaries, the Monday rollover, and pins.
+  // Both auto-detect and the manual fallback picker hit this endpoint, so
+  // whichever sets it first wins and it never changes again.
+  const user = await User.findById(req.user._id).select("timeZone");
+  if (user && user.timeZone && resolveTimeZone(user.timeZone) === user.timeZone) {
+    return res
+      .status(200)
+      .json({ timeZone: user.timeZone, alreadySet: true });
+  }
   await User.updateOne({ _id: req.user._id }, { $set: { timeZone: tz } });
-  res.status(200).json({ timeZone: tz });
+  res.status(200).json({ timeZone: tz, alreadySet: false });
+});
+
+// @desc    Get the current user's stored timezone (null if not set yet).
+// @route   GET /api/users/timezone
+// @access  Private
+const getTimeZone = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id).select("timeZone");
+  res.status(200).json({ timeZone: (user && user.timeZone) || null });
 });
 
 module.exports = {
   setTimeZone,
+  getTimeZone,
   authUser,
   registerUser,
   getUserById,
