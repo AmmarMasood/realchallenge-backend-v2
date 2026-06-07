@@ -5,13 +5,15 @@ const communityPostModel = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
   },
+  // Title is required for every post: challenge-completion posts set
+  // "I have completed …", user posts enter it in the composer.
   title: {
     type: String,
     required: true,
   },
+  // Description / body is optional (a post can be title + media only).
   text: {
     type: String,
-    required: true,
   },
   image: {
     type: String,

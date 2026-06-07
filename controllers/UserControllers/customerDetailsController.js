@@ -1362,8 +1362,10 @@ const getPhotoUploadUrl = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: "filename and mimeType are required" });
   }
 
-  if (!mimeType.startsWith("image/")) {
-    return res.status(400).json({ message: "Only image files are allowed" });
+  if (!mimeType.startsWith("image/") && !mimeType.startsWith("video/")) {
+    return res
+      .status(400)
+      .json({ message: "Only image or video files are allowed" });
   }
 
   const ext = filename.split(".").pop();
