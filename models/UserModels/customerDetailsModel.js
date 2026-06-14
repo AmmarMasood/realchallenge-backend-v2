@@ -43,6 +43,13 @@ const customerDetailsSchema = mongoose.Schema(
         ref: "Challenges",
       },
     ],
+    // Most recently played challenge — set on every progress update so the
+    // dashboard can offer a "Continue" entry point
+    lastPlayedChallenge: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Challenges",
+      default: null,
+    },
     trackChallenges: [
       {
         currentWorkout: {
@@ -76,6 +83,12 @@ const customerDetailsSchema = mongoose.Schema(
         },
         challengeCompletionRate: {
           type: Number,
+        },
+        // When the user last finished a workout in this challenge — drives the
+        // dashboard card's "Completed Today" state
+        lastWorkoutCompletedAt: {
+          type: Date,
+          default: null,
         },
         challengeReview: {
           type: mongoose.Schema.Types.ObjectId,

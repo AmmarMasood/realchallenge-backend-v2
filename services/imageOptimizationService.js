@@ -45,9 +45,58 @@ async function compressBuffer(buffer, mimetype) {
 }
 
 /**
- * Optimize an image that is already uploaded to S3.
- * Downloads the object, re-encodes it via sharp (same dimensions, smaller bytes),
- * overwrites the same S3 key, invalidates CloudFront, and updates DB size.
+ * Core optimization: download an S3 object, re-encode it via sharp (same
+ * dimensions, smaller bytes), and overwrite the same S3 key if (and only if)
+ * the re-encode actually saved bytes. Invalidates CloudFront on overwrite.
+ * No DB involvement — callers that track status layer it on top.
+ *
+ * Returns { overwritten, originalSize, optimizedSize }.
+ */
+async function optimizeS3ImageInPlace(s3Key, mimetype) {
+  const getResult = await s3
+    .getObject({ Bucket: bucketName, Key: s3Key })
+    .promise();
+
+  const originalBytes = getResult.Body;
+  const originalSize = originalBytes.length;
+
+  const optimizedBytes = await compressBuffer(originalBytes, mimetype);
+  const optimizedSize = optimizedBytes.length;
+
+  // Only overwrite if we actually saved bytes — avoid re-encoding images
+  // that are already well-optimized (since re-encoding always loses a tiny bit of quality).
+  if (optimizedSize >= originalSize) {
+    console.log(
+      `[ImageOpt] Skip overwrite for ${s3Key}: optimized ${optimizedSize} >= original ${originalSize}`
+    );
+    return { overwritten: false, originalSize, optimizedSize };
+  }
+
+  await s3
+    .putObject({
+      Bucket: bucketName,
+      Key: s3Key,
+      Body: optimizedBytes,
+      ContentType: mimetype,
+      CacheControl: "public, max-age=31536000, immutable",
+      ContentDisposition: "inline",
+      ServerSideEncryption: "AES256",
+    })
+    .promise();
+
+  await invalidateCloudFrontCache([s3Key]);
+
+  console.log(
+    `[ImageOpt] ${s3Key} optimized: ${originalSize} -> ${optimizedSize} bytes (${Math.round(
+      (1 - optimizedSize / originalSize) * 100
+    )}% reduction)`
+  );
+
+  return { overwritten: true, originalSize, optimizedSize };
+}
+
+/**
+ * Optimize a MediaFiles-tracked image that is already uploaded to S3.
  *
  * Mirrors the video pipeline's contract: fileLink/S3 key never changes,
  * processingStatus transitions none → processing → completed | failed.
@@ -66,50 +115,16 @@ async function optimizeImageInPlace({ s3Key, fileId, mimetype }) {
     }
     await mediaFile.save();
 
-    const getResult = await s3
-      .getObject({ Bucket: bucketName, Key: s3Key })
-      .promise();
+    const { overwritten, optimizedSize } = await optimizeS3ImageInPlace(
+      s3Key,
+      mimetype
+    );
 
-    const originalBytes = getResult.Body;
-    const originalSize = originalBytes.length;
-
-    const optimizedBytes = await compressBuffer(originalBytes, mimetype);
-    const optimizedSize = optimizedBytes.length;
-
-    // Only overwrite if we actually saved bytes — avoid re-encoding images
-    // that are already well-optimized (since re-encoding always loses a tiny bit of quality).
-    if (optimizedSize >= originalSize) {
-      console.log(
-        `[ImageOpt] Skip overwrite for ${fileId}: optimized ${optimizedSize} >= original ${originalSize}`
-      );
-      mediaFile.processingStatus = "completed";
-      await mediaFile.save();
-      return;
+    if (overwritten) {
+      mediaFile.size = optimizedSize;
     }
-
-    await s3
-      .putObject({
-        Bucket: bucketName,
-        Key: s3Key,
-        Body: optimizedBytes,
-        ContentType: mimetype,
-        CacheControl: "public, max-age=31536000, immutable",
-        ContentDisposition: "inline",
-        ServerSideEncryption: "AES256",
-      })
-      .promise();
-
-    mediaFile.size = optimizedSize;
     mediaFile.processingStatus = "completed";
     await mediaFile.save();
-
-    await invalidateCloudFrontCache([s3Key]);
-
-    console.log(
-      `[ImageOpt] File ${fileId} optimized: ${originalSize} -> ${optimizedSize} bytes (${Math.round(
-        (1 - optimizedSize / originalSize) * 100
-      )}% reduction)`
-    );
   } catch (err) {
     console.error(`[ImageOpt] Failed for file ${fileId}:`, err.message);
     try {
@@ -127,4 +142,5 @@ async function optimizeImageInPlace({ s3Key, fileId, mimetype }) {
 module.exports = {
   isOptimizableImage,
   optimizeImageInPlace,
+  optimizeS3ImageInPlace,
 };

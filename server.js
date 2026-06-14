@@ -1,6 +1,10 @@
+// Load env vars before anything that reads process.env at require time
+// (e.g. the Mollie client in subscriptionController)
+const dotenv = require("dotenv");
+dotenv.config();
+
 const express = require("express");
 const morgan = require("morgan");
-const dotenv = require("dotenv");
 const connectDB = require("./config/db");
 const { notFound, errorHandler } = require("./middlewares/errorMiddleware");
 const cors = require("cors");
@@ -8,7 +12,6 @@ const cors = require("cors");
 const {
   getAuthCode,
 } = require("./controllers/SubscriptionController/subscriptionController");
-dotenv.config();
 // app.use(bodyParser.urlencoded({ extended: true }));
 
 //importing routes

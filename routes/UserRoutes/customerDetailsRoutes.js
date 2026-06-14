@@ -16,11 +16,13 @@ const {
   getAllFavouriteChallenges,
   updateChallengeProgress,
   getChallengeProgress,
+  setLastPlayedChallenge,
   replaceFreeChallenge,
   addFreeChallenge,
   getUserPoints,
   availUserPoints,
   getPhotoUploadUrl,
+  confirmPhotoUpload,
   addToShoppingCart,
   removeFromShoppingCart,
   getShoppingCart,
@@ -34,6 +36,7 @@ const {
 // TODO FIX THE PROTECTION OF ROUTES
 router.post("/create", protect, createCustomer);
 router.post("/photo-upload", protect, getPhotoUploadUrl);
+router.post("/photo-upload/confirm", protect, confirmPhotoUpload);
 router.get("/all", protect, getAllCustomers);
 router.get(
   "/recommendedChallenges/:customerId",
@@ -99,6 +102,7 @@ router.put("/removeShoppingCart/:customerId", protect, removeFromShoppingCart);
 router.get("/points/get-points", protect, getUserPoints);
 router.post("/points/redeem", protect, availUserPoints);
 router.get("/track-challenge/:challengeId", protect, getChallengeProgress);
+router.put("/last-played/:challengeId", protect, setLastPlayedChallenge);
 router.post("/replace-free-challenge", protect, replaceFreeChallenge);
 router.post("/add-free-challenge", protect, addFreeChallenge);
 

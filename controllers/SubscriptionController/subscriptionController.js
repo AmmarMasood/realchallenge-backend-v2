@@ -16,9 +16,16 @@ const { Challenges } = require("../../models/ChallengeModels/challengesModel");
 const rp = require("request-promise");
 const NotificationService = require("../../services/notificationService");
 
+const mollieApiKey = process.env.MOLLIE_API_KEY;
 const mollieClient = createMollieClient({
-  apiKey: "test_T2KdmDqS6gacG8TBpRNbhWqH7pbrcV",
+  apiKey: mollieApiKey,
 });
+
+// Dev-only escape hatch while the Mollie account is not activated: fakes the
+// payment/subscription steps so the rest of the purchase flow (membership,
+// challenge grant) runs unchanged. Never active in production.
+const mollieBypassEnabled = () =>
+  process.env.MOLLIE_BYPASS === "true" && process.env.NODE_ENV !== "production";
 
 const authorizeApp = async (req, res) => {
   const config = {
@@ -190,6 +197,21 @@ const createFirstPayment = async (req, res) => {
       res.status(422).json({ errors: errors.array() });
       return;
     }
+
+    // Bypass: pretend the payment was created; the "checkout" link points
+    // straight at our own redirect page, so the flow continues as if the
+    // user paid and returned from Mollie.
+    if (mollieBypassEnabled()) {
+      console.warn(
+        `[MollieBypass] Skipping payment creation for user ${req.body.id}`
+      );
+      return res.json({
+        id: `bypass_payment_${Date.now()}`,
+        customerId: `bypass_customer_${req.body.id}`,
+        _links: { checkout: { href: req.body.redirectUrl } },
+      });
+    }
+
     //id of user
     let paymentInfo;
     const user = await User.findById(req.body.id);
@@ -268,8 +290,9 @@ const createSubscription = async (req, res) => {
     }
     const user = await User.findById(req.body.id).populate("customerDetails");
 
-    // Check if user already has an active membership
-    if (user?.customerDetails?.membership?.length > 0) {
+    // Check if user already has an active membership (skipped in bypass so
+    // repeat test purchases don't dead-end on the redirect page)
+    if (!mollieBypassEnabled() && user?.customerDetails?.membership?.length > 0) {
       return res.status(400).json({
         message:
           "Already Subcribed to Other Package. kindly revoke that subcription first.",
@@ -290,17 +313,37 @@ const createSubscription = async (req, res) => {
     }
 
     {
-      const subscription = await mollieClient.customers_subscriptions.create({
-        customerId: req.body.custId,
-        amount: {
-          currency: req.body.currency,
-          value: req.body.value,
-        },
-        // times: req.body.times,
-        interval: req.body.interval,
-        description: req.body.description,
-        // webhookUrl: "https://webshop.example.org/subscriptions/webhook/",
-      });
+      let subscription;
+      if (mollieBypassEnabled()) {
+        // Fake the Mollie subscription so membership + challenge grant
+        // proceed exactly like a real purchase
+        console.warn(
+          `[MollieBypass] Skipping subscription creation for user ${req.body.id}`
+        );
+        const start = new Date();
+        const next = new Date(start);
+        next.setMonth(next.getMonth() + 1);
+        subscription = {
+          id: `bypass_sub_${Date.now()}`,
+          description: req.body.description,
+          status: "active",
+          startDate: start.toISOString().slice(0, 10),
+          nextPaymentDate: next.toISOString().slice(0, 10),
+          amount: { currency: req.body.currency, value: req.body.value },
+        };
+      } else {
+        subscription = await mollieClient.customers_subscriptions.create({
+          customerId: req.body.custId,
+          amount: {
+            currency: req.body.currency,
+            value: req.body.value,
+          },
+          // times: req.body.times,
+          interval: req.body.interval,
+          description: req.body.description,
+          // webhookUrl: "https://webshop.example.org/subscriptions/webhook/",
+        });
+      }
 
       if (subscription) {
         let { id: subId } = subscription;
@@ -534,7 +577,7 @@ const getCustomerSubscribtionInformation = async (req, res) => {
     uri: `https://api.mollie.com/v2/customers/${customerId}/subscriptions`,
     headers: {
       Accepts: "application/json",
-      Authorization: "Bearer test_T2KdmDqS6gacG8TBpRNbhWqH7pbrcV",
+      Authorization: `Bearer ${mollieApiKey}`,
     },
   };
 

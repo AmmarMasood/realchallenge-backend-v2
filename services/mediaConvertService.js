@@ -1,5 +1,6 @@
 const AWS = require("aws-sdk");
 const MediaFiles = require("../models/MediaManagerModels/mediaFileModel");
+const UserVideoJob = require("../models/MediaManagerModels/userVideoJobModel");
 const { invalidateCloudFrontCache } = require("../config/s3");
 
 const bucketName = process.env.AWS_BUCKET_NAME;
@@ -145,7 +146,7 @@ async function getJobStatus(jobId) {
 }
 
 /**
- * Poll DB for processing files and check their MediaConvert job status.
+ * Poll DB for processing files/jobs and check their MediaConvert job status.
  * On completion: copy optimized file over original, delete temp, update DB, invalidate CloudFront.
  * On error: mark as failed in DB.
  */
@@ -155,6 +156,16 @@ async function pollAndProcessJobs() {
   if (isPolling) return; // Prevent overlapping poll cycles
   isPolling = true;
 
+  try {
+    await pollMediaFileJobs();
+    await pollUserVideoJobs();
+  } finally {
+    isPolling = false;
+  }
+}
+
+// Media manager files (MediaFiles records)
+async function pollMediaFileJobs() {
   try {
     const processingFiles = await MediaFiles.find({
       processingStatus: "processing",
@@ -190,53 +201,95 @@ async function pollAndProcessJobs() {
     }
   } catch (err) {
     console.error("[MediaConvert] Polling error:", err.message);
-  } finally {
-    isPolling = false;
+  }
+}
+
+// User video uploads (UserVideoJob records — community posts, before/after)
+async function pollUserVideoJobs() {
+  try {
+    const processingJobs = await UserVideoJob.find({
+      status: "processing",
+      mediaConvertJobId: { $ne: null },
+    });
+
+    if (processingJobs.length === 0) return;
+
+    console.log(
+      `[MediaConvert] Polling ${processingJobs.length} user video job(s)...`
+    );
+
+    for (const jobDoc of processingJobs) {
+      try {
+        const job = await getJobStatus(jobDoc.mediaConvertJobId);
+
+        if (job.Status === "COMPLETE") {
+          const newSize = await promoteTranscodeOutput(
+            `user-photos/mc_${jobDoc._id.toString()}_`,
+            jobDoc.s3Key
+          );
+
+          if (newSize == null) {
+            // Re-check DB — another poll cycle may have already handled this job
+            const freshJob = await UserVideoJob.findById(jobDoc._id);
+            if (freshJob && freshJob.status === "completed") continue;
+            console.error(
+              `[MediaConvert] No output file found for user video job ${jobDoc.mediaConvertJobId}`
+            );
+            jobDoc.status = "failed";
+            await jobDoc.save();
+            continue;
+          }
+
+          jobDoc.status = "completed";
+          jobDoc.optimizedSize = newSize;
+          await jobDoc.save();
+
+          console.log(
+            `[MediaConvert] User video ${jobDoc.s3Key} optimized: ${jobDoc.originalSize} -> ${newSize} bytes (${Math.round((1 - newSize / jobDoc.originalSize) * 100)}% reduction)`
+          );
+        } else if (job.Status === "ERROR") {
+          console.error(
+            `[MediaConvert] User video job ${jobDoc.mediaConvertJobId} failed:`,
+            job.ErrorMessage || "Unknown error"
+          );
+          jobDoc.status = "failed";
+          await jobDoc.save();
+        }
+        // PROGRESSING or SUBMITTED — skip, check next cycle
+      } catch (err) {
+        console.error(
+          `[MediaConvert] Error checking user video job ${jobDoc.mediaConvertJobId}:`,
+          err.message
+        );
+      }
+    }
+  } catch (err) {
+    console.error("[MediaConvert] User video polling error:", err.message);
   }
 }
 
 /**
- * Handle a completed MediaConvert job:
- * 1. Find the output file in S3 (MediaConvert appends to mc_ prefix)
+ * Promote a completed MediaConvert output:
+ * 1. Find the output file in S3 under `outputPrefix` (MediaConvert appends to mc_ prefix)
  * 2. Copy it over the original S3 key
  * 3. Delete the temp mc_ file
- * 4. Update DB with new size and status
- * 5. Invalidate CloudFront cache
+ * 4. Invalidate CloudFront cache
+ *
+ * Returns the new file size, or null if no output file was found.
  */
-async function handleJobComplete(file, job) {
-  const folderId = file.folderId.toString();
-  const originalKey = `${folderId}/${file.filename}`;
-
-  // Find the output file — MediaConvert creates files under a file-specific prefix
-  // The output key pattern is: {folderId}/mc_{fileId}_{something}.mp4
-  const fileId = file._id.toString();
+async function promoteTranscodeOutput(outputPrefix, originalKey) {
   const listResult = await s3
     .listObjectsV2({
       Bucket: bucketName,
-      Prefix: `${folderId}/mc_${fileId}_`,
+      Prefix: outputPrefix,
     })
     .promise();
 
-  const outputFiles = (listResult.Contents || []).filter((obj) => {
-    return obj.Key.startsWith(`${folderId}/mc_${fileId}_`) && obj.Key.endsWith(".mp4");
-  });
+  const outputFiles = (listResult.Contents || []).filter((obj) =>
+    obj.Key.endsWith(".mp4")
+  );
 
-  if (outputFiles.length === 0) {
-    // Re-check DB — another poll cycle may have already handled this file
-    const freshFile = await MediaFiles.findById(file._id);
-    if (freshFile && freshFile.processingStatus === "completed") {
-      console.log(
-        `[MediaConvert] File ${file._id} already completed by another cycle, skipping`
-      );
-      return;
-    }
-    console.error(
-      `[MediaConvert] No output file found for job ${file.mediaConvertJobId}`
-    );
-    file.processingStatus = "failed";
-    await file.save();
-    return;
-  }
+  if (outputFiles.length === 0) return null;
 
   // Use the most recently modified file matching our prefix
   const outputFile = outputFiles.sort(
@@ -279,15 +332,47 @@ async function handleJobComplete(file, job) {
     })
     .promise();
 
-  const newSize = headResult.ContentLength;
+  // Invalidate CloudFront cache for this file
+  await invalidateCloudFrontCache([originalKey]);
+
+  return headResult.ContentLength;
+}
+
+/**
+ * Handle a completed MediaConvert job for a media manager file:
+ * promote the output over the original key, then update the DB record.
+ */
+async function handleJobComplete(file, job) {
+  const folderId = file.folderId.toString();
+  const originalKey = `${folderId}/${file.filename}`;
+  const fileId = file._id.toString();
+
+  const newSize = await promoteTranscodeOutput(
+    `${folderId}/mc_${fileId}_`,
+    originalKey
+  );
+
+  if (newSize == null) {
+    // Re-check DB — another poll cycle may have already handled this file
+    const freshFile = await MediaFiles.findById(file._id);
+    if (freshFile && freshFile.processingStatus === "completed") {
+      console.log(
+        `[MediaConvert] File ${file._id} already completed by another cycle, skipping`
+      );
+      return;
+    }
+    console.error(
+      `[MediaConvert] No output file found for job ${file.mediaConvertJobId}`
+    );
+    file.processingStatus = "failed";
+    await file.save();
+    return;
+  }
 
   // Update DB
   file.processingStatus = "completed";
   file.size = newSize;
   await file.save();
-
-  // Invalidate CloudFront cache for this file
-  await invalidateCloudFrontCache([originalKey]);
 
   console.log(
     `[MediaConvert] File ${file._id} optimized: ${file.originalSize} -> ${newSize} bytes (${Math.round((1 - newSize / file.originalSize) * 100)}% reduction)`
@@ -314,6 +399,22 @@ async function cleanupStaleProcessing(maxAgeMs = 60 * 60 * 1000) {
     if (result.modifiedCount > 0) {
       console.log(
         `[MediaConvert] Marked ${result.modifiedCount} stale processing file(s) as failed`
+      );
+    }
+
+    const userResult = await UserVideoJob.updateMany(
+      {
+        status: "processing",
+        createdAt: { $lt: cutoff },
+      },
+      {
+        $set: { status: "failed" },
+      }
+    );
+
+    if (userResult.modifiedCount > 0) {
+      console.log(
+        `[MediaConvert] Marked ${userResult.modifiedCount} stale user video job(s) as failed`
       );
     }
   } catch (err) {

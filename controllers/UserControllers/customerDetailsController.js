@@ -15,7 +15,14 @@ const {
 const { IdentityStore } = require("aws-sdk");
 const NotificationService = require("../../services/notificationService");
 const { v4: uuidv4 } = require("uuid");
-const { getPresignedPutUrl, getCloudFrontUrl } = require("../../config/s3");
+const {
+  getPresignedPutUrl,
+  getCloudFrontUrl,
+  headObject,
+} = require("../../config/s3");
+const imageOptimizationService = require("../../services/imageOptimizationService");
+const mediaConvertService = require("../../services/mediaConvertService");
+const UserVideoJob = require("../../models/MediaManagerModels/userVideoJobModel");
 const { normalizeSupplementOption } = require("../../services/mealPlanService");
 
 // @desc    Create Customer role by ID
@@ -1041,12 +1048,25 @@ const updateChallengeProgress = asyncHandler(async (req, res, next) => {
       if (challengeIndex >= 0) {
         const areChallengePointGained =
           newTrackChallenges[challengeIndex].challengePointGained;
+        // Stamp completion time only when a workout was newly finished
+        // (completedWorkouts grew), otherwise keep the prior timestamp
+        const prevCompletedCount = (
+          newTrackChallenges[challengeIndex].completedWorkouts || []
+        ).length;
+        const newCompletedCount = (
+          req.body.progress.completedWorkouts || []
+        ).length;
+        const lastWorkoutCompletedAt =
+          newCompletedCount > prevCompletedCount
+            ? new Date()
+            : newTrackChallenges[challengeIndex].lastWorkoutCompletedAt;
         console.log("here 2");
         newTrackChallenges[challengeIndex] = {
           ...req.body.progress,
           challengeCompletionRate: rate,
           challengeCompleted: rate === 100 ? true : false,
           challengePointGained: areChallengePointGained,
+          lastWorkoutCompletedAt,
         };
 
         if (
@@ -1077,6 +1097,10 @@ const updateChallengeProgress = asyncHandler(async (req, res, next) => {
           ...req.body.progress,
           challengeCompletionRate: rate,
           challengeCompleted: rate === 100 ? true : false,
+          lastWorkoutCompletedAt:
+            (req.body.progress.completedWorkouts || []).length > 0
+              ? new Date()
+              : null,
         });
 
         if (
@@ -1109,13 +1133,21 @@ const updateChallengeProgress = asyncHandler(async (req, res, next) => {
         ...req.body.progress,
         challengeCompletionRate: rate,
         challengeCompleted: rate === 100 ? true : false,
+        lastWorkoutCompletedAt:
+          (req.body.progress.completedWorkouts || []).length > 0
+            ? new Date()
+            : null,
       });
     }
 
     console.log("here 6", newTrackChallenges);
     const response = await CustomerDetails.findByIdAndUpdate(
       customerDetails._id,
-      { trackChallenges: newTrackChallenges },
+      {
+        trackChallenges: newTrackChallenges,
+        // Remember where the user left off so the dashboard can offer Continue
+        lastPlayedChallenge: req.body.progress.challenge,
+      },
       {
         useFindAndModify: false,
       }
@@ -1373,7 +1405,112 @@ const getPhotoUploadUrl = asyncHandler(async (req, res) => {
   const presignedUrl = await getPresignedPutUrl(s3Key, mimeType);
   const fileUrl = getCloudFrontUrl(s3Key);
 
-  res.status(200).json({ presignedUrl, fileUrl });
+  res.status(200).json({ presignedUrl, fileUrl, s3Key });
+});
+
+// @desc    Confirm a user photo/video upload completed; optimize it in place
+// @route   POST /api/customerDetails/photo-upload/confirm
+// @access  Private
+const confirmPhotoUpload = asyncHandler(async (req, res) => {
+  const { s3Key, mimeType } = req.body;
+
+  if (!s3Key || !mimeType) {
+    return res.status(400).json({ message: "s3Key and mimeType are required" });
+  }
+
+  // Only keys issued by photo-upload may be optimized through this endpoint
+  if (!s3Key.startsWith("user-photos/") || s3Key.includes("..")) {
+    return res.status(400).json({ message: "Invalid s3Key" });
+  }
+
+  const isVideo = mimeType.startsWith("video/");
+
+  if (!isVideo && !imageOptimizationService.isOptimizableImage(mimeType)) {
+    return res
+      .status(200)
+      .json({ optimized: false, message: "File type is not optimizable" });
+  }
+
+  let headResult;
+  try {
+    headResult = await headObject(s3Key);
+  } catch (err) {
+    return res.status(400).json({
+      message: "File not found in S3. Upload may have failed or the pre-signed URL expired.",
+    });
+  }
+
+  res.status(200).json({ optimized: true, message: "Optimization started" });
+
+  if (isVideo) {
+    // Fire-and-forget: same MediaConvert pipeline as the media manager, tracked
+    // via UserVideoJob since these uploads have no MediaFiles record. The
+    // poller copies the transcoded output over the same key, so the URL on the
+    // post stays valid throughout.
+    (async () => {
+      let jobDoc;
+      try {
+        jobDoc = await UserVideoJob.create({
+          user: req.user._id,
+          s3Key,
+          originalSize: headResult.ContentLength,
+        });
+        const jobId = await mediaConvertService.createTranscodeJob(
+          s3Key,
+          "user-photos",
+          jobDoc._id.toString()
+        );
+        jobDoc.mediaConvertJobId = jobId;
+        await jobDoc.save();
+        console.log(`[MediaConvert] Started job ${jobId} for user video ${s3Key}`);
+      } catch (err) {
+        console.error(
+          `[MediaConvert] Failed to start job for user video ${s3Key}:`,
+          err.message
+        );
+        if (jobDoc) {
+          jobDoc.status = "failed";
+          await jobDoc.save().catch(() => {});
+        }
+      }
+    })();
+  } else {
+    // Fire-and-forget: same in-place sharp optimization as the media manager
+    imageOptimizationService
+      .optimizeS3ImageInPlace(s3Key, mimeType)
+      .catch((err) =>
+        console.error(`[ImageOpt] User photo ${s3Key} failed:`, err.message)
+      );
+  }
+});
+
+// @desc    Record the user's last-played challenge (set on entering the
+//          player, so the dashboard "Continue" sign appears without needing
+//          saved workout progress)
+// @route   PUT /api/customerDetails/last-played/:challengeId
+// @access  Private
+const setLastPlayedChallenge = asyncHandler(async (req, res) => {
+  const { challengeId } = req.params;
+  const user = await User.findById(req.user._id).populate("customerDetails");
+  if (!user || !user.customerDetails) {
+    return res.status(404).json({ message: "Customer details not found" });
+  }
+
+  // Only record challenges the user actually owns, so "Continue" stays
+  // meaningful and isn't overwritten by previews of unowned challenges.
+  const owns = (user.customerDetails.challenges || []).some(
+    (c) => c.toString() === challengeId
+  );
+  if (!owns) {
+    return res.status(200).json({ updated: false });
+  }
+
+  await CustomerDetails.findByIdAndUpdate(
+    user.customerDetails._id,
+    { lastPlayedChallenge: challengeId },
+    { useFindAndModify: false }
+  );
+  res.status(200).json({ updated: true });
 });
 
 module.exports = {
@@ -1389,11 +1526,13 @@ module.exports = {
   getAllFavouriteRecipes,
   updateChallengeProgress,
   getChallengeProgress,
+  setLastPlayedChallenge,
   replaceFreeChallenge,
   addFreeChallenge,
   getUserPoints,
   availUserPoints,
   getPhotoUploadUrl,
+  confirmPhotoUpload,
   addToShoppingCart,
   removeFromShoppingCart,
   getShoppingCart,
