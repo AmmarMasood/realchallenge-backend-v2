@@ -509,7 +509,8 @@ const acquireEditLock = asyncHandler(async (req, res) => {
         "editLock.lockedAt": new Date(),
       },
     },
-    { new: true }
+    // timestamps:false — lock churn must not bump updatedAt/"last modified"
+    { new: true, timestamps: false }
   );
 
   if (result) {
@@ -546,13 +547,18 @@ const releaseEditLock = asyncHandler(async (req, res) => {
     filter["editLock.lockedBy"] = userId;
   }
 
-  await Recipe.findOneAndUpdate(filter, {
-    $set: {
-      "editLock.lockedBy": null,
-      "editLock.lockedByName": null,
-      "editLock.lockedAt": null,
+  await Recipe.findOneAndUpdate(
+    filter,
+    {
+      $set: {
+        "editLock.lockedBy": null,
+        "editLock.lockedByName": null,
+        "editLock.lockedAt": null,
+      },
     },
-  });
+    // timestamps:false — releasing the lock must not bump updatedAt/"last modified"
+    { timestamps: false }
+  );
 
   res.status(200).json({ released: true });
 });
@@ -567,7 +573,8 @@ const renewEditLock = asyncHandler(async (req, res) => {
   const result = await Recipe.findOneAndUpdate(
     { _id: recipeId, "editLock.lockedBy": userId },
     { $set: { "editLock.lockedAt": new Date() } },
-    { new: true }
+    // timestamps:false — heartbeat must not bump updatedAt/"last modified"
+    { new: true, timestamps: false }
   );
 
   if (!result) {
@@ -612,13 +619,18 @@ const releaseEditLockBeacon = asyncHandler(async (req, res) => {
     filter["editLock.lockedBy"] = user._id;
   }
 
-  await Recipe.findOneAndUpdate(filter, {
-    $set: {
-      "editLock.lockedBy": null,
-      "editLock.lockedByName": null,
-      "editLock.lockedAt": null,
+  await Recipe.findOneAndUpdate(
+    filter,
+    {
+      $set: {
+        "editLock.lockedBy": null,
+        "editLock.lockedByName": null,
+        "editLock.lockedAt": null,
+      },
     },
-  });
+    // timestamps:false — releasing the lock must not bump updatedAt/"last modified"
+    { timestamps: false }
+  );
 
   res.status(200).json({ released: true });
 });
