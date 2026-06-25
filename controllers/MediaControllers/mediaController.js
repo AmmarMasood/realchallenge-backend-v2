@@ -14,6 +14,7 @@ const ThumbnailService = require("../../services/thumbnailService");
 const VideoOptimizationService = require("../../services/videoOptimizationService");
 const mediaConvertService = require("../../services/mediaConvertService");
 const imageOptimizationService = require("../../services/imageOptimizationService");
+const audioOptimizationService = require("../../services/audioOptimizationService");
 const {
   sendProgressUpdate,
   sendUploadComplete,
@@ -503,6 +504,17 @@ const uploadMediaFile = asyncHandler(async (req, res, next) => {
       .catch((err) =>
         console.error("[ImageOpt] Unhandled error:", err.message)
       );
+  } else if (audioOptimizationService.isOptimizableAudio(file.mimetype)) {
+    // Fire-and-forget: ffmpeg-based audio optimization (transcode to MP3 192k, in-place overwrite, same URL)
+    const s3KeyForAudio = `${folderId}/${finalFile.filename}`;
+    audioOptimizationService
+      .optimizeAudioInPlace({
+        s3Key: s3KeyForAudio,
+        fileId: mediaFile._id.toString(),
+      })
+      .catch((err) =>
+        console.error("[AudioOpt] Unhandled error:", err.message)
+      );
   }
 });
 
@@ -793,6 +805,16 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
         })
         .catch((err) =>
           console.error("[ImageOpt] Unhandled error:", err.message)
+        );
+    } else if (audioOptimizationService.isOptimizableAudio(file.mimetype)) {
+      const s3KeyForAudio = `${folderId}/${finalFile.filename}`;
+      audioOptimizationService
+        .optimizeAudioInPlace({
+          s3Key: s3KeyForAudio,
+          fileId: mediaFile._id.toString(),
+        })
+        .catch((err) =>
+          console.error("[AudioOpt] Unhandled error:", err.message)
         );
     }
   } catch (error) {
@@ -1596,6 +1618,18 @@ const confirmUpload = asyncHandler(async (req, res) => {
       .catch((err) =>
         console.error("[ImageOpt] Unhandled error:", err.message)
       );
+  } else if (audioOptimizationService.isOptimizableAudio(mimeType)) {
+    // Fire-and-forget: ffmpeg-based audio optimization (transcode to MP3 192k, in-place overwrite, same URL)
+    mediaFile.originalSize = fileSize;
+    await mediaFile.save();
+    audioOptimizationService
+      .optimizeAudioInPlace({
+        s3Key,
+        fileId: mediaFile._id.toString(),
+      })
+      .catch((err) =>
+        console.error("[AudioOpt] Unhandled error:", err.message)
+      );
   }
 });
 
@@ -1631,7 +1665,7 @@ const thumbnailCallback = asyncHandler(async (req, res) => {
   res.status(200).json({ message: "Callback received (thumbnail failed)" });
 });
 
-// @desc    Retry optimization for a failed file (video → MediaConvert, image → sharp)
+// @desc    Retry optimization for a failed file (video → MediaConvert, image → sharp, audio → ffmpeg)
 // @route   POST /api/media/retry-optimization/:fileId
 // @access  Private
 const retryOptimization = asyncHandler(async (req, res) => {
@@ -1657,6 +1691,19 @@ const retryOptimization = asyncHandler(async (req, res) => {
     webp: "image/webp",
   };
   const inferredMime = imageMimeByExt[ext];
+
+  if (mediaFile.mediaType === "audio") {
+    res.status(200).json({ message: "Audio optimization retry started" });
+    audioOptimizationService
+      .optimizeAudioInPlace({
+        s3Key,
+        fileId: mediaFile._id.toString(),
+      })
+      .catch((err) =>
+        console.error("[AudioOpt] Retry unhandled error:", err.message)
+      );
+    return;
+  }
 
   if (mediaFile.mediaType === "picture" && inferredMime) {
     res.status(200).json({ message: "Image optimization retry started" });
