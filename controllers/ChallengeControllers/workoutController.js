@@ -63,6 +63,10 @@ const createWorkout = asyncHandler(async (workout) => {
       introVideoLength: workout.introVideoLength,
       relatedEquipments: workout.relatedEquipments,
       isRendered: workout.isRendered,
+      workoutType: workout.workoutType,
+      audioLink: workout.audioLink,
+      backgroundImageLink: workout.backgroundImageLink,
+      backgroundVideoLink: workout.backgroundVideoLink,
       exercises: workout.exercises, //ids with extra stuff
     });
 
@@ -191,6 +195,27 @@ const updateWorkout = asyncHandler(async (req, res, next) => {
         isRendered: Object.prototype.hasOwnProperty.call(req.body, "isRendered")
           ? req.body.isRendered
           : oldWorkout.isRendered,
+        workoutType: Object.prototype.hasOwnProperty.call(
+          req.body,
+          "workoutType"
+        )
+          ? req.body.workoutType
+          : oldWorkout.workoutType,
+        audioLink: Object.prototype.hasOwnProperty.call(req.body, "audioLink")
+          ? req.body.audioLink
+          : oldWorkout.audioLink,
+        backgroundImageLink: Object.prototype.hasOwnProperty.call(
+          req.body,
+          "backgroundImageLink"
+        )
+          ? req.body.backgroundImageLink
+          : oldWorkout.backgroundImageLink,
+        backgroundVideoLink: Object.prototype.hasOwnProperty.call(
+          req.body,
+          "backgroundVideoLink"
+        )
+          ? req.body.backgroundVideoLink
+          : oldWorkout.backgroundVideoLink,
         exercises: req.body.exercises, //ids
       };
 

@@ -44,6 +44,22 @@ const workoutSchema = mongoose.Schema(
     isRendered: {
       type: Boolean,
     },
+    // Workout kind. Older documents don't have this — derive from isRendered
+    // (true → "exercise", false → "video"). "audio" is the meditation/
+    // breathing type: one audio track + a static image OR looping bg video.
+    workoutType: {
+      type: String,
+      enum: ["exercise", "video", "audio"],
+    },
+    audioLink: {
+      type: String,
+    },
+    backgroundImageLink: {
+      type: String,
+    },
+    backgroundVideoLink: {
+      type: String,
+    },
     exercises: [
       {
         exerciseId: { type: mongoose.Schema.Types.ObjectId, ref: "Exercise" },
