@@ -187,8 +187,19 @@ const getAllTrainerGoalsPublic = asyncHandler(async (req, res) => {
 
   const goals = await TrainerGoal.find(query);
 
+  // Multiple trainers can define the same goal name (e.g. two "Yoga" docs) —
+  // surface each name once. The key includes language so that when no
+  // language filter is passed, the same name still appears once per language.
+  const seen = new Set();
+  const uniqueGoals = (goals || []).filter((g) => {
+    const key = `${(g.name || "").trim().toLowerCase()}|${g.language || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
   res.status(200).json({
-    goals: goals || [],
+    goals: uniqueGoals,
   });
 });
 
