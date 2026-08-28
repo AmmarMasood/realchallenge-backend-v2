@@ -1,77 +1,140 @@
 const asyncHandler = require("express-async-handler");
-const { body, validationResult } = require("express-validator");
+const { validationResult } = require("express-validator");
 const { TrainerGoal } = require("../../models/UserModels/trainerGoalModel");
+const {
+  Discipline,
+  toPickerShape,
+} = require("../../models/DisciplineModels/disciplineModel");
+const { DEFAULT_LANGUAGE } = require("../../utils/language");
 
-// post /api/trainers/trainerGoals
+/**
+ * These endpoints keep their historical names and response shape
+ * (`{ goals: [{ _id, name, icon }] }`) so the wizard, profile page and admin
+ * pickers keep working unchanged — but the vocabulary they serve now comes
+ * from the canonical `Discipline` collection instead of per-trainer
+ * `TrainerGoal` documents. `_id` in the response is a Discipline id, which is
+ * exactly what `fitnessInterests` and `trainersFitnessInterest` store.
+ *
+ * TrainerGoal is now only the trainer -> discipline join.
+ */
+
+// Turn a free-text name into a stable slug ("Boxing" -> "boxing").
+const toSlug = (name) =>
+  String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+/**
+ * Find a discipline by slug, creating it if new. Admin-created disciplines
+ * arrive as a single name in one language; store it as the canonical name and
+ * also as that language's translation.
+ */
+async function findOrCreateDiscipline({ name, icon, language }) {
+  const slug = toSlug(name);
+  if (!slug) return null;
+
+  const existing = await Discipline.findOne({ slug });
+  if (existing) {
+    // Fill in a translation we don't have yet rather than duplicating.
+    if (
+      language &&
+      !(existing.translations || []).some((t) => t.language === language)
+    ) {
+      existing.translations.push({ language, name: String(name).trim() });
+      await existing.save();
+    }
+    return existing;
+  }
+
+  return Discipline.create({
+    slug,
+    name: String(name).trim(),
+    icon: icon || "",
+    translations: language ? [{ language, name: String(name).trim() }] : [],
+  });
+}
+
+// POST /api/trainers/trainerGoals
+// Creates the discipline if needed, then links it to the calling trainer.
 const createTrainerGoal = asyncHandler(async (req, res, next) => {
   if (Object.keys(req.body).length === 0) {
-    return res.status(500).json("Trainer goal cannot be empty.");
+    return res.status(400).json("Trainer goal cannot be empty.");
   }
   try {
-    const errors = validationResult(req); // Finds the validation errors in this request and wraps them in an object with handy functions
-
+    const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      res.status(422).json({ errors: errors.array() });
-      return;
+      return res.status(422).json({ errors: errors.array() });
     }
 
-    // Get trainer ID from authenticated user
-    const trainerId = req.user._id;
-
-    let newBody = new TrainerGoal({
+    const discipline = await findOrCreateDiscipline({
       name: req.body.name,
       icon: req.body.icon,
       language: req.body.language,
-      trainerId: trainerId,
     });
-
-    newBody = await newBody.save();
-    if (!newBody) {
-      return res.status(400).json("Trainer goal cannot be created!");
-    } else {
-      return res.status(201).json({
-        mesage: "Trainer goal Created Successfully",
-        newBody,
-      });
+    if (!discipline) {
+      return res.status(400).json("A discipline name is required.");
     }
+
+    const trainerId = req.user._id;
+    // Idempotent: a trainer listing the same discipline twice is a no-op.
+    const link = await TrainerGoal.findOneAndUpdate(
+      { trainerId, discipline: discipline._id },
+      { $setOnInsert: { trainerId, discipline: discipline._id } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    return res.status(201).json({
+      mesage: "Trainer goal Created Successfully",
+      // Shape kept: callers read `_id` and `name` off this.
+      newBody: toPickerShape(discipline, req.body.language || DEFAULT_LANGUAGE),
+      link: link._id,
+    });
   } catch (err) {
     return next(err);
   }
 });
 
+// PUT /api/trainers/trainerGoals/:goalId
+// Renames the underlying discipline. Editing shared vocabulary affects every
+// trainer that lists it — which is the point of having one canonical entry.
 const updateTrainerGoal = asyncHandler(async (req, res, next) => {
   try {
     const trainerId = req.user._id;
-    const goalId = req.params.goalId;
-
-    // Find the goal first to check ownership
-    const existingGoal = await TrainerGoal.findById(goalId);
-
-    if (!existingGoal) {
+    const link = await TrainerGoal.findById(req.params.goalId);
+    if (!link) {
       res.status(404);
       throw new Error("Trainer Goal not found");
     }
-
-    // Check if the goal belongs to the current user
-    if (existingGoal.trainerId.toString() !== trainerId.toString()) {
+    if (link.trainerId.toString() !== trainerId.toString()) {
       res.status(403);
       throw new Error("Not authorized to update this goal");
     }
 
-    // Only allow updating name, icon, language (not trainerId)
-    const update = {
-      name: req.body.name,
-      icon: req.body.icon,
-      language: req.body.language,
-    };
+    const discipline = await Discipline.findById(link.discipline);
+    if (!discipline) {
+      res.status(404);
+      throw new Error("Discipline not found");
+    }
 
-    await TrainerGoal.findByIdAndUpdate(goalId, update, {
-      useFindAndModify: false,
-    });
+    const language = req.body.language || DEFAULT_LANGUAGE;
+    if (req.body.name) {
+      const idx = (discipline.translations || []).findIndex(
+        (t) => t.language === language
+      );
+      if (idx >= 0) discipline.translations[idx].name = req.body.name.trim();
+      else
+        discipline.translations.push({ language, name: req.body.name.trim() });
 
-    const updatedGoal = await TrainerGoal.findById(goalId);
+      // Keep the canonical label in step when editing the default language.
+      if (language === DEFAULT_LANGUAGE) discipline.name = req.body.name.trim();
+    }
+    if (req.body.icon !== undefined) discipline.icon = req.body.icon;
+    await discipline.save();
+
     res.status(200).json({
-      data: updatedGoal,
+      data: toPickerShape(discipline, language),
       message: "Trainer Fitness Interest Updated",
     });
   } catch (error) {
@@ -79,127 +142,70 @@ const updateTrainerGoal = asyncHandler(async (req, res, next) => {
   }
 });
 
-// @desc    Get body by ID
-// @route   GET /api/body/:bodyId
-// const getBodyById = asyncHandler(async (req, res) => {
-//   const body = await Body.findById(req.params.bodyId);
-
-//   if (body) {
-//     res.json(body);
-//   } else {
-//     res.status(404);
-//     throw new Error("Body not found");
-//   }
-// });
-
-// @desc    Get All trainer goals for the current user
-// @route   GET /api/trainers/trainerGoals/all
+// GET /api/trainers/trainerGoals/all — disciplines the CALLING trainer lists
 const getAllTrainerGoals = asyncHandler(async (req, res) => {
-  const trainerId = req.user._id;
-
-  let query = { trainerId: trainerId };
-
-  // Optionally filter by language
-  if (req.query.language && req.query.language.length > 0) {
-    query.language = req.query.language;
-  }
-
-  const goals = await TrainerGoal.find(query);
-
-  if (goals) {
-    res.status(200).json({
-      goals: goals,
-    });
-  } else {
-    res.status(404);
-    throw new Error("Goals Cannot be fetched");
-  }
-});
-
-// @desc    Update Body by Id
-// @route   PUT /api/body/:id
-// const updateBody = asyncHandler(async (req, res, next) => {
-//   try {
-//     const update = req.body;
-//     const bodyId = req.params.bodyId;
-//     await Body.findByIdAndUpdate(bodyId, update, {
-//       useFindAndModify: false,
-//     });
-//     const body = await Body.findById(bodyId);
-//     res.status(200).json({
-//       data: body,
-//       message: "Body has been updated",
-//     });
-//   } catch (error) {
-//     next(error);
-//   }
-// });
-
-// @desc    Get trainer goals by trainer ID (public - for viewing trainer profiles)
-// @route   GET /api/trainers/trainerGoals/trainer/:trainerId
-const getTrainerGoalsByTrainerId = asyncHandler(async (req, res) => {
-  const trainerId = req.params.trainerId;
-
-  let query = { trainerId: trainerId };
-
-  // Optionally filter by language
-  if (req.query.language && req.query.language.length > 0) {
-    query.language = req.query.language;
-  }
-
-  const goals = await TrainerGoal.find(query);
+  const language = req.query.language || DEFAULT_LANGUAGE;
+  const links = await TrainerGoal.find({ trainerId: req.user._id }).populate(
+    "discipline"
+  );
 
   res.status(200).json({
-    goals: goals || [],
+    goals: links
+      .filter((l) => l.discipline)
+      .map((l) => toPickerShape(l.discipline, language)),
   });
 });
 
-// @desc    Delete trainer goal (only if owned by current user)
-// @route   Delete /api/trainers/trainerGoals/:goalId
+// GET /api/trainers/trainerGoals/trainer/:trainerId — public trainer profile
+const getTrainerGoalsByTrainerId = asyncHandler(async (req, res) => {
+  const language = req.query.language || DEFAULT_LANGUAGE;
+  const links = await TrainerGoal.find({
+    trainerId: req.params.trainerId,
+  }).populate("discipline");
+
+  res.status(200).json({
+    goals: links
+      .filter((l) => l.discipline)
+      .map((l) => toPickerShape(l.discipline, language)),
+  });
+});
+
+// DELETE /api/trainers/trainerGoals/:goalId
+// Unlinks the discipline from this trainer. The discipline itself survives —
+// other trainers and existing challenge/customer references still need it.
 const deleteTrainerGoal = asyncHandler(async (req, res) => {
   const trainerId = req.user._id;
-  const goal = await TrainerGoal.findById(req.params.goalId);
+  const link = await TrainerGoal.findById(req.params.goalId);
 
-  if (!goal) {
+  if (!link) {
     res.status(404);
     throw new Error("Trainer Goal not found");
   }
-
-  // Check if the goal belongs to the current user
-  if (goal.trainerId.toString() !== trainerId.toString()) {
+  if (link.trainerId.toString() !== trainerId.toString()) {
     res.status(403);
     throw new Error("Not authorized to delete this goal");
   }
 
-  await goal.remove();
+  await link.remove();
   res.json({ message: "Trainer Goal removed" });
 });
 
-// @desc    Get all trainer goals in the database (public)
-// @route   GET /api/trainers/trainerGoals/public/all
+// GET /api/trainers/trainerGoals/public/all
+// The vocabulary itself — what the signup wizard, profile page and admin
+// challenge forms populate their pickers from.
+//
+// The old implementation returned every TrainerGoal and de-duplicated by
+// lowercased name, so which ObjectId a picker got depended on document order.
+// Disciplines are unique by construction, so no de-duplication is needed.
 const getAllTrainerGoalsPublic = asyncHandler(async (req, res) => {
-  let query = {};
-
-  // Optionally filter by language
-  if (req.query.language && req.query.language.length > 0) {
-    query.language = req.query.language;
-  }
-
-  const goals = await TrainerGoal.find(query);
-
-  // Multiple trainers can define the same goal name (e.g. two "Yoga" docs) —
-  // surface each name once. The key includes language so that when no
-  // language filter is passed, the same name still appears once per language.
-  const seen = new Set();
-  const uniqueGoals = (goals || []).filter((g) => {
-    const key = `${(g.name || "").trim().toLowerCase()}|${g.language || ""}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+  const language = req.query.language || DEFAULT_LANGUAGE;
+  const disciplines = await Discipline.find({ isActive: true }).sort({
+    sortOrder: 1,
+    name: 1,
   });
 
   res.status(200).json({
-    goals: uniqueGoals,
+    goals: disciplines.map((d) => toPickerShape(d, language)),
   });
 });
 
@@ -210,4 +216,5 @@ module.exports = {
   getTrainerGoalsByTrainerId,
   deleteTrainerGoal,
   updateTrainerGoal,
+  findOrCreateDiscipline,
 };

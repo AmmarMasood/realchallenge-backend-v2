@@ -1,12 +1,12 @@
 /**
- * Meal-plan generation, extracted verbatim (behavior-preserving) from
- * customerDetailsController#recommendedWeeklyDiet so the new WeekPlan /
- * lifecycle layer and the legacy endpoint share one algorithm.
+ * Meal-plan generation. THE single home for it.
  *
- * Phase 1: this service is the single home for generation. The legacy
- * controller still has its own inline copy and will be re-pointed here in
- * Phase 2 (after output is verified against the dev DB), to avoid
- * destabilizing the flow the client is currently testing.
+ * Originally extracted from customerDetailsController#recommendedWeeklyDiet
+ * while both existed side by side. That legacy endpoint and its inline copy of
+ * the algorithm have since been deleted, so there is no longer a second
+ * implementation to keep in sync — extend this service rather than adding one.
+ *
+ * Reached via /api/meal-plan (mealPlanController -> buildWeekPlan).
  */
 const { User } = require("../models/UserModels/userModel");
 const { Recipe } = require("../models/RecipeModels/recipeModel");
@@ -17,6 +17,7 @@ const {
   getZonedParts,
   WEEKDAY_KEYS,
 } = require("../utils/weekTime");
+const { pickBest } = require("./recommendation/recipeScoring");
 
 // The frontend stores "none" | "during-the-day" | "extra-meal" (see
 // Nutrient.js supplement modal). The original generator compared against
@@ -30,11 +31,99 @@ function normalizeSupplementOption(raw) {
   return "none"; // "", "none", anything unrecognized
 }
 
-function shuffle(array) {
+// Atwater factors: grams of each macro -> kilocalories. Budgets are held in
+// kcal (a percentage split of caloriesPerDay), while recipes store grams, so
+// every comparison between the two has to convert.
+//
+// These were previously written as 0.09 / 0.04 — 100x too small — which made
+// every macro gate pass trivially: a 15 g fat recipe scored 1.35 against a
+// budget of ~160. Only the calorie cap actually constrained a plan, so the
+// customer's protein/carb/fat split had no effect on what they were served.
+const KCAL_PER_G_FAT = 9;
+const KCAL_PER_G_PROTEIN = 4;
+const KCAL_PER_G_CARB = 4;
+
+/**
+ * Deterministic PRNG (mulberry32) seeded from a string.
+ *
+ * Plan generation used Math.random(), so the same customer + week + recipe
+ * pool produced a different plan on every call: plans could not be reproduced
+ * for support ("why did I get this?"), regression-tested, or safely retried.
+ * Seeding on customer + week keeps variety ACROSS weeks and between customers
+ * while making any single week reproducible.
+ */
+function makeRng(seedString) {
+  let h = 1779033703 ^ String(seedString).length;
+  for (let i = 0; i < String(seedString).length; i++) {
+    h = Math.imul(h ^ String(seedString).charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  let a = h >>> 0;
+  return function rng() {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Fisher-Yates driven by the supplied rng, so shuffling is reproducible.
+function shuffle(array, rng) {
+  const rand = rng || Math.random;
   for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rand() * (i + 1));
     [array[i], array[j]] = [array[j], array[i]];
   }
+}
+
+// ── Pure candidate predicates ────────────────────────────────────────────
+// Extracted from generateDayPlans so they can be unit-tested without a DB.
+// Behaviour is unchanged; these are the rules that decide whether a recipe is
+// eligible for a slot, in spec priority order: allergies > diet > macros.
+
+/**
+ * True when the recipe carries ANY allergen the customer must avoid.
+ * Highest-priority exclusion — a false negative here serves someone food they
+ * are allergic to, so it is covered by a permanent regression test.
+ */
+function recipeHasAllergen(recipe, allergyNames) {
+  if (!allergyNames || !allergyNames.length) return false;
+  return (recipe.allergens || [])
+    .map((a) => a && a.name)
+    .some((an) => allergyNames.includes(an));
+}
+
+/**
+ * True when the recipe satisfies EVERY diet the customer follows. Someone on
+ * "Vegetarian" + "Gluten Free" needs recipes that are both, so this is
+ * intentionally AND, not OR.
+ *
+ * `.every()` on an empty list is true, which is the point: no diet set means
+ * no dietary restriction. A previous version hoisted an `isFound` flag outside
+ * the recipe loop and only assigned it inside the diet loop, so a customer
+ * with no diets left it false for every recipe and got a completely empty
+ * week — 7 days, zero meals, despite a full recipe pool.
+ */
+function recipeMatchesDiet(recipe, dietOptions) {
+  const recipeDiets = (recipe.diet || []).map((d) => d && d.name);
+  return (dietOptions || []).every((myDiet) =>
+    recipeDiets.includes(myDiet && myDiet.name)
+  );
+}
+
+/**
+ * True when a recipe fits within a quarter of the day's remaining budget on
+ * calories AND every macro. `gate` holds kcal figures; recipe macros are in
+ * grams, hence the Atwater conversions.
+ */
+function fitsGate(recipe, gate) {
+  return (
+    (recipe.kCalPerPerson || 0) < gate.cal / 4 &&
+    (recipe.fat || 0) * KCAL_PER_G_FAT < gate.fat / 4 &&
+    (recipe.protein || 0) * KCAL_PER_G_PROTEIN < gate.protein / 4 &&
+    (recipe.carbohydrate || 0) * KCAL_PER_G_CARB < gate.carb / 4
+  );
 }
 
 // Load the populated customer the generator needs (mirrors the controller).
@@ -142,7 +231,14 @@ async function resolvePinnedSlots(customerDetailsId, weekId, dietNames, allergen
  * within what's left (spec §12/§23). Returns legacy-shaped dayPlan
  * objects (breakfast/lunch/dinner/snack1/snack2/lateMeal/extra/dayMeal).
  */
-async function generateDayPlans(customer, { language, pinnedSlots } = {}) {
+// `seed` makes generation reproducible — callers pass something stable for the
+// customer + week (see buildWeekPlan). Omitted, it falls back to Math.random()
+// so ad-hoc callers still work, just non-deterministically.
+async function generateDayPlans(
+  customer,
+  { language, pinnedSlots, seed } = {}
+) {
+  const rng = seed ? makeRng(seed) : Math.random;
   const cd = customer.customerDetails;
   const caloriesPerDay_final = cd.caloriesPerDay;
   const fatPerDay_final = (cd.amountOfFat / 100) * caloriesPerDay_final;
@@ -208,29 +304,27 @@ async function generateDayPlans(customer, { language, pinnedSlots } = {}) {
   const weeklyDietPlan = [];
   if (!recipes || !recipes.length) return weeklyDietPlan;
 
+  // Scoring inputs. Favourites are a signal, not a filter — a favourite that
+  // blows the macro budget still gets gated out.
+  const favouriteIds = (cd.favouriteRecipes || []).map((r) =>
+    String((r && r._id) || r)
+  );
+  // recipe id -> most recent day index it was placed on, so the variety signal
+  // can push repeats apart across the week rather than only within a day.
+  const usageByRecipeId = {};
+
   const breakfastRecipes = [];
   const lunchRecipes = [];
   const dinnerRecipes = [];
   const snackRecipes = [];
 
-  let isFound = false;
   for (const recipe of recipes) {
     // Allergen exclusion runs first (spec §12: allergies > diet > macros).
-    if (allergyNames.length) {
-      const ra = (recipe.allergens || []).map((a) => a && a.name);
-      if (ra.some((an) => allergyNames.includes(an))) continue;
-    }
-    for (const myDiet of dietOptions) {
-      isFound = false;
-      for (const diet of recipe.diet) {
-        if (myDiet.name == diet.name) {
-          isFound = true;
-          break;
-        }
-      }
-      if (!isFound) break;
-    }
-    if (isFound) {
+    if (recipeHasAllergen(recipe, allergyNames)) continue;
+
+    const matchesDiet = recipeMatchesDiet(recipe, dietOptions);
+
+    if (matchesDiet) {
       for (const mt of recipe.mealTypes || []) {
         const slot = mt && mt.name;
         if (slot === "breakfast") breakfastRecipes.push(recipe);
@@ -266,9 +360,9 @@ async function generateDayPlans(customer, { language, pinnedSlots } = {}) {
       let fuelPlaced = false;
       for (const recipe of daySupps) {
         caloriesPerDay -= recipe.kCalPerPerson;
-        fatPerDay -= recipe.fat * 0.09;
-        carbohydratePerDay -= recipe.carbohydrate * 0.04;
-        proteinPerDay -= recipe.protein * 0.04;
+        fatPerDay -= recipe.fat * KCAL_PER_G_FAT;
+        carbohydratePerDay -= recipe.carbohydrate * KCAL_PER_G_CARB;
+        proteinPerDay -= recipe.protein * KCAL_PER_G_PROTEIN;
         if (dayMeal) {
           // Fuel Moment: the first scheduled supplement replaces the
           // user-chosen snack slot; extras fall back to dayMealN.
@@ -309,12 +403,15 @@ async function generateDayPlans(customer, { language, pinnedSlots } = {}) {
     for (const canonical of Object.keys(dayPins)) {
       const r = dayPins[canonical];
       gateCal -= r.kCalPerPerson || 0;
-      gateFat -= (r.fat || 0) * 0.09;
-      gateCarb -= (r.carbohydrate || 0) * 0.04;
-      gatePro -= (r.protein || 0) * 0.04;
+      gateFat -= (r.fat || 0) * KCAL_PER_G_FAT;
+      gateCarb -= (r.carbohydrate || 0) * KCAL_PER_G_CARB;
+      gatePro -= (r.protein || 0) * KCAL_PER_G_PROTEIN;
     }
 
     const usedIds = new Set();
+    // Food types already placed today — feeds the spread signal so a day is
+    // not three near-identical meals. Per-day, unlike usageByRecipeId.
+    const usedFoodTypeIds = new Set();
     const fillOrder = [
       ["breakfast", breakfastRecipes, "breakfast"],
       ["lunch", lunchRecipes, "lunch"],
@@ -339,27 +436,45 @@ async function generateDayPlans(customer, { language, pinnedSlots } = {}) {
         usedIds.add(String(pinned._id));
         continue;
       }
-      // 2) Generate: first pool recipe that fits the per-slot gate and
-      //    isn't already used today.
-      const pick = (pool || []).find(
-        (r) =>
-          !usedIds.has(String(r._id)) &&
-          (r.kCalPerPerson || 0) < gateCal / 4 &&
-          (r.fat || 0) * 0.09 < gateFat / 4 &&
-          (r.protein || 0) * 0.04 < gatePro / 4 &&
-          (r.carbohydrate || 0) * 0.04 < gateCarb / 4
+      // 2) Generate. The gate is a HARD filter — a recipe must fit what's left
+      //    of the day's budget — but among those that fit we now pick the BEST
+      //    rather than the first. Previously any eligible recipe was as good as
+      //    any other, so a recipe landing exactly on the macro target ranked
+      //    the same as one scraping under the calorie cap.
+      const gate = {
+        cal: gateCal,
+        fat: gateFat,
+        protein: gatePro,
+        carb: gateCarb,
+      };
+      const eligible = (pool || []).filter(
+        (r) => !usedIds.has(String(r._id)) && fitsGate(r, gate)
       );
+      const pick = pickBest(eligible, {
+        gate,
+        usageByRecipeId,
+        dayIndex: i,
+        favouriteIds,
+        usedFoodTypeIds,
+        // Seeded — keeps this week reproducible while letting near-equal
+        // candidates differ from week to week.
+        rng,
+      });
       if (pick) {
         dayPlan[key] = pick;
         usedIds.add(String(pick._id));
+        usageByRecipeId[String(pick._id)] = i;
+        for (const ft of pick.foodTypes || []) {
+          usedFoodTypeIds.add(String((ft && ft._id) || ft));
+        }
       }
     }
 
     weeklyDietPlan.push(JSON.parse(JSON.stringify(dayPlan)));
-    shuffle(breakfastRecipes);
-    shuffle(lunchRecipes);
-    shuffle(dinnerRecipes);
-    shuffle(snackRecipes);
+    shuffle(breakfastRecipes, rng);
+    shuffle(lunchRecipes, rng);
+    shuffle(dinnerRecipes, rng);
+    shuffle(snackRecipes, rng);
   }
 
   return weeklyDietPlan;
@@ -421,7 +536,13 @@ async function buildWeekPlan({ customerUserId, customerDetailsId, type, status, 
       allergenNames
     );
   }
-  const dayPlans = await generateDayPlans(customer, { language, pinnedSlots });
+  // Seed on customer + week so a given week is reproducible, while different
+  // weeks (and different customers) still get different plans.
+  const dayPlans = await generateDayPlans(customer, {
+    language,
+    pinnedSlots,
+    seed: `${customerDetailsId}:${week_id}`,
+  });
 
   const ends_at = new Date(start);
   ends_at.setUTCDate(ends_at.getUTCDate() + 6);
@@ -475,6 +596,16 @@ async function upsertWeekPlan(planDoc) {
 }
 
 module.exports = {
+  // Pure helpers — exported primarily so they can be unit-tested without a DB.
+  recipeHasAllergen,
+  recipeMatchesDiet,
+  fitsGate,
+  makeRng,
+  shuffle,
+  KCAL_PER_G_FAT,
+  KCAL_PER_G_PROTEIN,
+  KCAL_PER_G_CARB,
+
   normalizeSupplementOption,
   loadPlanInputs,
   generateDayPlans,

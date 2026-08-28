@@ -183,10 +183,31 @@ const challengesSchema = mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // Pulled from the platform entirely - a trainer has left, or the content is
+    // wrong. Unlike simply un-publishing, this removes access for people who
+    // already own it, so affected customers are owed a discount code.
+    //
+    // Un-publishing (isPublic false) is the softer action: it only stops new
+    // people finding or buying it.
+    forceDeactivated: {
+      type: Boolean,
+      default: false,
+    },
+    forceDeactivatedAt: {
+      type: Date,
+    },
+    forceDeactivatedReason: {
+      type: String,
+    },
+    // Disciplines this challenge covers (Boxing, Strength, HIIT, …). Matched
+    // against `customerDetails.fitnessInterests` — the recommender's primary
+    // signal. Now references the canonical `Discipline` collection rather than
+    // the trainer-scoped `TrainerGoal`; see disciplineModel.js for why.
+    // Field name kept for compatibility with existing callers.
     trainersFitnessInterest: [
       {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "TrainerGoal",
+        ref: "Discipline",
       },
     ],
     reviews: [reviewSchema],

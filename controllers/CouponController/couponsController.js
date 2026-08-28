@@ -1,6 +1,8 @@
 const asyncHandler = require("express-async-handler");
 const { Coupons } = require("../../models/CouponModel/couponsModel");
 const { body, validationResult } = require("express-validator");
+const { validateCoupon } = require("../../services/couponService");
+const { resolveOrderPrice } = require("../../services/pricing");
 
 // @desc    Create Coupon
 // @route   POST /api/coupon/create
@@ -145,6 +147,14 @@ const getCouponByCode = asyncHandler(async (req, res) => {
     code: req.params.couponCode,
   }).populate("couponUsers");
 
+  // A deactivated coupon must behave as if it does not exist. `isActive` was
+  // never checked anywhere, so switching a coupon off in the admin panel had no
+  // effect at all and the discount kept working.
+  if (coupon && !coupon.isActive) {
+    res.status(404);
+    throw new Error("Coupons Not found");
+  }
+
   if (coupon) {
     res.status(200).json({
       coupon,
@@ -156,50 +166,60 @@ const getCouponByCode = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Get Coupons by name
-// @route   GET /api/coupons/use/:couponCode
-// @route   Public
+// @desc    Check a coupon is redeemable, and preview the discounted price.
+//          Deliberately spends nothing: this runs when the customer clicks
+//          "Apply", which is before they reach Mollie. It used to redeem the
+//          coupon there and then, so abandoning the checkout burned the code
+//          permanently — the user was already in `couponUsers`. Redemption now
+//          happens at fulfilment, once the payment is confirmed paid.
+// @route   GET /api/coupons/use/:couponId
+// @access  Private
 const useCoupon = asyncHandler(async (req, res) => {
-  let coupon = await Coupons.findById(req.params.couponId).populate(
-    "couponUsers"
-  );
-  console.log(coupon);
+  // Sent as query params: this is a GET, and a body on a GET is not reliably
+  // transmitted.
+  const { packageType, challengeId } = {
+    ...(req.body || {}),
+    ...(req.query || {}),
+  };
 
-  if (!coupon || !coupon.couponUsers) {
-    res.status(404);
-    throw new Error("Coupon Not Found");
+  let coupon;
+  let pricing = null;
+  try {
+    coupon = await validateCoupon({
+      couponId: req.params.couponId,
+      packageType,
+      challengeId,
+      userId: req.user._id,
+    });
+
+    // Price the order here too, and let the browser display THIS number. The
+    // discount used to be recomputed in the browser, which rounded the
+    // half-cent the other way — the customer was shown €17.46 and charged
+    // €17.47. One computation, one answer.
+    if (packageType) {
+      const priced = await resolveOrderPrice({
+        packageType,
+        challengeIds: challengeId ? [challengeId] : [],
+        couponId: coupon._id,
+        userId: req.user._id,
+      });
+      pricing = {
+        listPrice: priced.listPrice,
+        price: priced.gross,
+        currency: priced.currency,
+        discountPercent: coupon.discountPercent,
+      };
+    }
+  } catch (err) {
+    res.status(err.statusCode || 400);
+    throw new Error(err.message);
   }
-
-  // Check if coupon has reached usage limit
-  if (coupon.limitUsage <= coupon.couponUsers.length) {
-    res.status(400);
-    throw new Error("Coupon usage limit reached");
-  }
-
-  // Check if user has already used this coupon
-  const alreadyUsed = coupon.couponUsers.some(
-    (user) => user._id.toString() === req.user._id.toString()
-  );
-  if (alreadyUsed) {
-    res.status(400);
-    throw new Error("You have already used this coupon");
-  }
-
-  // Update coupon: add user to couponUsers and increment currentUsage
-  const updatedCoupon = await Coupons.findByIdAndUpdate(
-    coupon._id,
-    {
-      $push: { couponUsers: req.user._id },
-      $inc: { currentUsage: 1 },
-    },
-    { new: true, useFindAndModify: false }
-  );
-
-  console.log("updatedCoupon", updatedCoupon);
 
   res.status(200).json({
-    coupon: updatedCoupon,
-    message: "Coupon used successfully",
+    coupon,
+    pricing,
+    valid: true,
+    message: "Coupon applied",
   });
 });
 

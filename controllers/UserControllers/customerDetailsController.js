@@ -1,4 +1,5 @@
 const asyncHandler = require("express-async-handler");
+const mongoose = require("mongoose");
 const { body, validationResult } = require("express-validator");
 const { tags } = require("../../models/ChallengeModels/tagsModel");
 const generateToken = require("../../utils/generateToken");
@@ -9,9 +10,11 @@ const {
 const { User } = require("../../models/UserModels/userModel");
 const { Challenges } = require("../../models/ChallengeModels/challengesModel");
 const { Recipe } = require("../../models/RecipeModels/recipeModel");
+const { DEFAULT_LANGUAGE } = require("../../utils/language");
+const { resolveCustomerGoal } = require("../../utils/goals");
 const {
-  ChallengeGoals,
-} = require("../../models/ChallengeModels/challengeGoalsModel");
+  rankChallenges,
+} = require("../../services/recommendation/challengeScoring");
 const { IdentityStore } = require("aws-sdk");
 const NotificationService = require("../../services/notificationService");
 const { v4: uuidv4 } = require("uuid");
@@ -262,18 +265,18 @@ const getAllFavouriteRecipes = asyncHandler(async (req, res, next) => {
         },
       ],
     });
-    let favRecipes = await user.customerDetails.favouriteRecipes;
+    const favRecipes =
+      (user && user.customerDetails && user.customerDetails.favouriteRecipes) ||
+      [];
 
-    if (favRecipes && favRecipes.length > 0) {
-      return res.status(200).json({
-        message: "Favourite recipes fetched successfully",
-        favRecipes,
-      });
-    } else {
-      return res
-        .status(400)
-        .json({ message: "Have not favourited any recipes yet" });
-    }
+    // Empty list is a normal state, not a client error — see the note on
+    // getAllFavouriteChallenges below.
+    return res.status(200).json({
+      message: favRecipes.length
+        ? "Favourite recipes fetched successfully"
+        : "No favourite recipes yet",
+      favRecipes,
+    });
   } catch (err) {
     return next(err);
   }
@@ -380,15 +383,15 @@ const getAllFavouriteChallenges = asyncHandler(async (req, res, next) => {
     });
     const favChallenges =
       (user && user.customerDetails && user.customerDetails.favouriteChallenges) || [];
-    if (favChallenges.length > 0) {
-      return res.status(200).json({
-        message: "Favourite challenges fetched successfully",
-        favChallenges,
-      });
-    }
-    return res
-      .status(400)
-      .json({ message: "Have not favourited any challenges yet" });
+    // An empty favourites list is a normal state, not a client error. This
+    // used to answer 400, which logged a console error on every dashboard load
+    // for anyone who had not favourited anything yet.
+    return res.status(200).json({
+      message: favChallenges.length
+        ? "Favourite challenges fetched successfully"
+        : "No favourite challenges yet",
+      favChallenges,
+    });
   } catch (err) {
     return next(err);
   }
@@ -562,56 +565,98 @@ const getShoppingCart = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Get Recommended challenges for User based on the Goals they set
-//          by mappping to challengesGoals
-// @route   GET /api/customerDetails/:customerId/recommendedChallenge
+// @desc    Get recommended challenges for a customer.
+//
+//          Hard filters (published, language, goal, not already owned) run in
+//          Mongo; ranking is done by services/recommendation/challengeScoring.
+//          A customer has exactly one goal out of three, so the goal is a
+//          filter — discipline overlap is what actually ranks the results.
+//
+//          Returns 200 with an empty list and a `reason` when there is nothing
+//          to show. An unset goal is a normal state, not an error, and the old
+//          404 meant the frontend never surfaced the message.
+//
+// @route   GET /api/customerDetails/recommendedChallenges/:customerId
+//          ?language=english&limit=10
 const getRecommendedChallenge = asyncHandler(async (req, res) => {
   const customer = await User.findById(req.params.customerId)
     .select("-passwordHash")
     .populate("customerDetails");
-  const custGoals = await customer.customerDetails.goals;
-  //goals []
-  const challenges = await Challenges.find({});
 
-  let isFound = false;
-  if (challenges && custGoals) {
-    let recommendedchallenge = [];
-
-    for (let chall of challenges) {
-      const challGoals = chall.challengeGoals;
-      console.log(chall);
-      if (challGoals.length > 0) {
-        for (let goal of custGoals) {
-          for (let cg of challGoals) {
-            if (goal === cg) {
-              recommendedchallenge.push(chall);
-              isFound = true;
-              break;
-            }
-          }
-          if (isFound) {
-            isFound = false;
-            break;
-          }
-        }
-      }
-    }
-
-    if (recommendedchallenge.length > 0) {
-      res.status(200).json({
-        recommendedchallenge,
-      });
-    } else {
-      res.status(404);
-      throw new Error(
-        "You haven't set you Goals yet.Please update your profile to view recommended Challenges"
-      );
-    }
-  } else {
+  if (!customer || !customer.customerDetails) {
     res.status(404);
-    throw new Error("Challenges/Goals not fetched");
+    throw new Error("Customer not found");
   }
-  // const challGoals = await challenges.challengeGoals;
+
+  const details = customer.customerDetails;
+  const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+  const language = req.query.language || DEFAULT_LANGUAGE;
+
+  const goal = resolveCustomerGoal(details.goals);
+  if (!goal) {
+    return res.status(200).json({ recommendedChallenges: [], reason: "no_goal" });
+  }
+
+  const ownedIds = (details.challenges || []).map((c) => c._id || c);
+
+  // Trainers and body-focus areas from challenges the customer already owns —
+  // used for the affinity signals.
+  const owned = ownedIds.length
+    ? await Challenges.find({ _id: { $in: ownedIds } })
+        .select("trainers body")
+        .lean()
+    : [];
+  const profile = {
+    fitnessInterests: details.fitnessInterests || [],
+    preferredIntensity: details.preferredIntensity || [],
+    trainerIds: owned.flatMap((c) => c.trainers || []),
+    bodyIds: owned.flatMap((c) => c.body || []),
+  };
+
+  const baseFilter = {
+    isPublic: true,
+    adminApproved: true,
+    language,
+    _id: { $nin: ownedIds },
+  };
+
+  // Disciplines are populated so the scorer can name the overlap in its
+  // "reasons" payload — the customer's own fitnessInterests are stored as bare
+  // ObjectIds, so the names have to come from this side.
+  const withDisciplines = (q) =>
+    q.populate("trainersFitnessInterest", "name").lean();
+
+  // Both pools are always scored and merged, rather than using off-goal only
+  // as a top-up when the on-goal list is short. Topping up made the result
+  // depend on `limit`: with exactly N on-goal challenges, limit=N hid off-goal
+  // entirely while limit=N+1 could put one first. A customer whose disciplines
+  // only match off-goal challenges saw nothing relevant at one limit and their
+  // best match at the next.
+  //
+  // The OFF_GOAL_PENALTY in the scorer is what encodes "prefer the customer's
+  // goal" — it does that consistently at every limit, whereas the fetch order
+  // did it only sometimes.
+  const [onGoal, offGoal] = await Promise.all([
+    withDisciplines(Challenges.find({ ...baseFilter, challengeGoals: goal })),
+    withDisciplines(
+      Challenges.find({ ...baseFilter, challengeGoals: { $ne: goal } })
+    ),
+  ]);
+
+  const ranked = rankChallenges(onGoal, profile)
+    .concat(rankChallenges(offGoal, profile, { offGoal: true }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  res.status(200).json({
+    recommendedChallenges: ranked.map((r) => ({
+      ...r.challenge,
+      score: Math.round(r.score * 1000) / 1000,
+      offGoal: r.offGoal,
+      reasons: r.reasons,
+    })),
+    reason: ranked.length === 0 ? "no_matches" : null,
+  });
 });
 
 // @desc swap recipe
@@ -695,328 +740,17 @@ const swapRecipe = asyncHandler(async (req, res, next) => {
   }
 });
 
-// @desc    Recommend Weekly Diet based on calories
-// @route  GET /api/customerDetails/recommendedWeeklyDiet/:customerId
-const shuffle = (array) => {
-  for (let i = array.length - 1; i > 0; i--) {
-    let j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-};
-const recommendedWeeklyDiet = asyncHandler(async (req, res, next) => {
-  try {
-    const customer = await User.findById(req.params.customerId)
-      .select("-passwordHash")
-      .populate({
-        path: "customerDetails",
-        model: "CustomerDetails",
-        populate: [
-          {
-            path: "myDiet",
-            select: "name -_id",
-          },
-          {
-            path: "supplementIntake.recipes",
-            select: "name kCalPerPerson protein carbohydrate fat -_id",
-          },
-        ],
-      });
-
-    let caloriesPerDay_final = await customer.customerDetails.caloriesPerDay;
-    let fatPercent = await customer.customerDetails.amountOfFat;
-    let carbohydratePercent = await customer.customerDetails
-      .amountOfCarbohydrate;
-    let proteinPercent = await customer.customerDetails.amountOfProtein;
-    const dietOptions = await customer.customerDetails.myDiet;
-    const lateMeal = await customer.customerDetails.lateMeal;
-    const supplements = await customer.customerDetails.supplementIntake;
-
-    let fatPerDay_final = (fatPercent / 100) * caloriesPerDay_final;
-    let carbohydratePerDay_final =
-      (carbohydratePercent / 100) * caloriesPerDay_final;
-    let proteinPerDay_final = (proteinPercent / 100) * caloriesPerDay_final;
-
-    let weeklyDietPlan = [];
-    let breakfastRecipes = [];
-    let lunchRecipes = [];
-    let dinnerRecipes = [];
-    let snackRecipes = [];
-
-    const recipeFilter = {
-      isPublic: true,
-      adminApproved: true,
-      isSupplement: { $ne: true },
-    };
-    if (req.query.language) {
-      recipeFilter.language = req.query.language;
-    }
-    const recipes = await Recipe.find(recipeFilter)
-      .populate("ingredients.name")
-      .populate({ path: "diet", model: "Diet", select: "name -_id" })
-      .populate({ path: "mealTypes", model: "MealType", select: "name -_id" });
-
-    let isFound = false;
-    if (recipes) {
-      for (let recipe of recipes) {
-        for (let myDiet of dietOptions) {
-          isFound = false;
-          for (let diet of recipe.diet) {
-            if (myDiet.name == diet.name) {
-              isFound = true;
-              break;
-            }
-          }
-          if (!isFound) {
-            break;
-          }
-        }
-        // Slot bucketing is driven by MealType, which is now a fixed enum
-        // ("breakfast" | "morningSnack" | "lunch" | "afternoonSnack" | "dinner").
-        // FoodType remains free-form for category labels and is unused here.
-        if (isFound) {
-          for (let mt of recipe.mealTypes || []) {
-            const slot = mt && mt.name;
-            if (slot === "breakfast")      { breakfastRecipes.push(recipe); }
-            else if (slot === "morningSnack" || slot === "afternoonSnack") { snackRecipes.push(recipe); }
-            else if (slot === "lunch")     { lunchRecipes.push(recipe); }
-            else if (slot === "dinner")    { dinnerRecipes.push(recipe); }
-          }
-        }
-      }
-
-      for (let i = 1; i <= 7; i++) {
-        let dayPlan = {};
-
-        let caloriesPerDay = caloriesPerDay_final;
-        let fatPerDay = fatPerDay_final;
-        let carbohydratePerDay = carbohydratePerDay_final;
-        let proteinPerDay = proteinPerDay_final;
-
-        //add supplement meals
-        let dayMealCount = 0;
-        let extraMealCount = 0;
-        const suppMode = normalizeSupplementOption(
-          supplements.supplementOption
-        );
-        const dayMeal = suppMode === "during_day";
-        const extraMeal = suppMode === "extra_meal";
-        const noMeal = suppMode === "none";
-        if (suppMode !== "none") {
-          for (let recipe of supplements.recipes) {
-            caloriesPerDay -= recipe.kCalPerPerson;
-            fatPerDay -= recipe.fat * 0.09;
-            carbohydratePerDay -= recipe.carbohydrate * 0.04;
-            proteinPerDay -= recipe.protein * 0.04;
-            if (dayMeal) {
-              dayMealCount++;
-              if (dayMealCount == 1) {
-                dayPlan.dayMeal1 = recipe;
-              } else if (dayMealCount == 2) {
-                dayPlan.dayMeal2 = recipe;
-              } else if (dayMealCount == 3) {
-                dayPlan.dayMeal3 = recipe;
-              } else if (dayMealCount == 4) {
-                dayPlan.dayMeal4 = recipe;
-              }
-            } else if (extraMeal) {
-              extraMealCount++;
-              if (extraMealCount == 1) {
-                dayPlan.extraMeal1 = recipe;
-              } else if (extraMealCount == 2) {
-                dayPlan.extraMeal2 = recipe;
-              } else if (extraMealCount == 3) {
-                dayPlan.extraMeal3 = recipe;
-              } else if (extraMealCount == 4) {
-                dayPlan.extraMeal4 = recipe;
-              }
-            }
-          }
-        }
-
-        let calories = caloriesPerDay;
-        let fat = fatPerDay;
-        let carbohydrate = carbohydratePerDay;
-        let protein = proteinPerDay;
-        let dayPlanPushed = false;
-
-        for (let breakfast of breakfastRecipes) {
-          if (
-            breakfast.kCalPerPerson < caloriesPerDay / 4 &&
-            breakfast.fat * 0.09 < fatPerDay / 4 &&
-            breakfast.protein * 0.04 < proteinPerDay / 4 &&
-            breakfast.carbohydrate * 0.04 < carbohydratePerDay / 4
-          ) {
-            dayPlan.breakfast = breakfast;
-            calories -= breakfast.kCalPerPerson;
-            fat -= breakfast.fat * 0.09;
-            carbohydrate -= breakfast.carbohydrate * 0.04;
-            protein -= breakfast.protein * 0.04;
-            for (let lunch of lunchRecipes) {
-              if (
-                lunch.kCalPerPerson < caloriesPerDay / 4 &&
-                lunch.fat * 0.09 < fatPerDay / 4 &&
-                lunch.protein * 0.04 < proteinPerDay / 4 &&
-                lunch.carbohydrate * 0.04 < carbohydratePerDay / 4 &&
-                lunch._id != breakfast._id
-              ) {
-                dayPlan.lunch = lunch;
-                calories -= lunch.kCalPerPerson;
-                fat -= lunch.fat * 0.09;
-                carbohydrate -= lunch.carbohydrate * 0.04;
-                protein -= lunch.protein * 0.04;
-                for (let dinner of dinnerRecipes) {
-                  if (
-                    dinner.kCalPerPerson < caloriesPerDay / 4 &&
-                    dinner.fat * 0.09 < fatPerDay / 4 &&
-                    dinner.protein * 0.04 < proteinPerDay / 4 &&
-                    dinner.carbohydrate * 0.04 < carbohydratePerDay / 4 &&
-                    dinner._id != lunch._id &&
-                    dinner._id != breakfast._id
-                  ) {
-                    dayPlan.dinner = dinner;
-                    calories -= dinner.kCalPerPerson;
-                    fat -= dinner.fat * 0.09;
-                    carbohydrate -= dinner.carbohydrate * 0.04;
-                    protein -= dinner.protein * 0.04;
-                    for (let snack of snackRecipes) {
-                      if (
-                        snack.kCalPerPerson < caloriesPerDay / 4 &&
-                        snack.fat * 0.09 < fatPerDay / 4 &&
-                        snack.protein * 0.04 < proteinPerDay / 4 &&
-                        snack.carbohydrate * 0.04 < carbohydratePerDay / 4 &&
-                        snack._id != lunch._id &&
-                        snack._id != breakfast._id &&
-                        snack._id != dinner._id
-                      ) {
-                        if (noMeal || extraMeal) {
-                          if (dayPlan.snack1 == null) {
-                            dayPlan.snack1 = snack;
-                            calories -= snack.kCalPerPerson;
-                            fat -= snack.fat * 0.09;
-                            carbohydrate -= snack.carbohydrate * 0.04;
-                            protein -= snack.protein * 0.04;
-                          } else if (dayPlan.snack2 == null) {
-                            dayPlan.snack2 = snack;
-                            calories -= snack.kCalPerPerson;
-                            fat -= snack.fat * 0.09;
-                            carbohydrate -= snack.carbohydrate * 0.04;
-                            protein -= snack.protein * 0.04;
-                            if (!lateMeal && !dayPlanPushed) {
-                              let finalDayPlan = JSON.parse(
-                                JSON.stringify(dayPlan)
-                              );
-                              weeklyDietPlan.push(finalDayPlan);
-                              dayPlanPushed = true;
-                            }
-                          } else if (lateMeal) {
-                            dayPlan.lateMeal = snack;
-                            calories -= snack.kCalPerPerson;
-                            fat -= snack.fat * 0.09;
-                            carbohydrate -= snack.carbohydrate * 0.04;
-                            protein -= snack.protein * 0.04;
-                            if (!dayPlanPushed) {
-                              let finalDayPlan = JSON.parse(
-                                JSON.stringify(dayPlan)
-                              );
-                              weeklyDietPlan.push(finalDayPlan);
-                              dayPlanPushed = true;
-                            }
-                          }
-                        } else {
-                          if (lateMeal) {
-                            dayPlan.lateMeal = snack;
-                            calories -= snack.kCalPerPerson;
-                            fat -= snack.fat * 0.09;
-                            carbohydrate -= snack.carbohydrate * 0.04;
-                            protein -= snack.protein * 0.04;
-                            if (!dayPlanPushed) {
-                              let finalDayPlan = JSON.parse(
-                                JSON.stringify(dayPlan)
-                              );
-                              weeklyDietPlan.push(finalDayPlan);
-                              dayPlanPushed = true;
-                            }
-                          } else {
-                            if (!dayPlanPushed) {
-                              let finalDayPlan = JSON.parse(
-                                JSON.stringify(dayPlan)
-                              );
-                              weeklyDietPlan.push(finalDayPlan);
-                              dayPlanPushed = true;
-                            }
-                          }
-                        }
-                      }
-                      if (dayPlanPushed) break;
-                    }
-                    if (!dayPlanPushed) {
-                      //snacks
-                      if (noMeal || extraMeal) {
-                        if (dayPlan.snack1) {
-                          calories += dayPlan.snack1.kCalPerPerson;
-                          fat += dayPlan.snack1.fat * 0.09;
-                          carbohydrate += dayPlan.snack1.carbohydrate * 0.04;
-                          protein += dayPlan.snack1.protein * 0.04;
-                          dayPlan.snack1 = null;
-                        }
-                        if (dayPlan.snack2) {
-                          calories += dayPlan.snack2.kCalPerPerson;
-                          fat += dayPlan.snack2.fat * 0.09;
-                          carbohydrate += dayPlan.snack2.carbohydrate * 0.04;
-                          protein += dayPlan.snack2.protein * 0.04;
-                          dayPlan.snack2 = null;
-                        }
-                      }
-                      //dinner
-                      dayPlan.dinner = null;
-                      calories += dinner.kCalPerPerson;
-                      fat += dinner.fat * 0.09;
-                      carbohydrate += dinner.carbohydrate * 0.04;
-                      protein += dinner.protein * 0.04;
-                    }
-                  }
-                  if (dayPlanPushed) break;
-                }
-                if (!dayPlanPushed) {
-                  dayPlan.lunch = null;
-                  calories += lunch.kCalPerPerson;
-                  fat += lunch.fat * 0.09;
-                  carbohydrate += lunch.carbohydrate * 0.04;
-                  protein += lunch.protein * 0.04;
-                }
-              }
-              if (dayPlanPushed) break;
-            }
-            if (!dayPlanPushed) {
-              dayPlan.breakfast = null;
-              calories += breakfast.kCalPerPerson;
-              fat += breakfast.fat * 0.09;
-              carbohydrate += breakfast.carbohydrate * 0.04;
-              protein += breakfast.protein * 0.04;
-            }
-          }
-          if (dayPlanPushed) {
-            break;
-          }
-        }
-        shuffle(breakfastRecipes);
-        shuffle(lunchRecipes);
-        shuffle(dinnerRecipes);
-        shuffle(snackRecipes);
-      }
-
-      res.status(200).json({
-        weeklyDietPlan,
-      });
-    } else {
-      res.status(404).json({
-        message: "No recipes found",
-      });
-    }
-  } catch (error) {
-    next(error);
-  }
-});
+// REMOVED: recommendedWeeklyDiet (and its local `shuffle` helper).
+//
+// This endpoint held a second, older copy of the meal-plan generator. It was
+// superseded by services/mealPlanService (used by /api/meal-plan), but stayed
+// routed and was still called on every dashboard load with its result
+// discarded. Worse, the copy here never filtered allergens — the highest
+// priority exclusion in the spec — so any caller reaching it could be served
+// a recipe the customer is allergic to.
+//
+// Meal plans come from mealPlanController -> buildWeekPlan. Do not restore
+// a second generator here; extend the service instead.
 
 // @desc    Update Customer Details by Id
 // @route   PUT /api/customerDetails/track-challenge/:customerId
@@ -1208,15 +942,36 @@ const replaceFreeChallenge = asyncHandler(async (req, res, next) => {
     });
 
     const customerDetails = user.customerDetails;
+
+    // Accept either the full challenge object (what the browser sends) or a
+    // bare id. Without this, a body of the wrong shape left `_id` undefined,
+    // which pushed `undefined` into the challenges array — the user's free
+    // challenge was removed, garbage stored in its place, and the endpoint
+    // still answered 200 "Challenge replaced!".
+    const requested = req.body.challenge;
+    const requestedId =
+      requested && typeof requested === "object" ? requested._id : requested;
+
+    if (!requestedId || !mongoose.Types.ObjectId.isValid(requestedId)) {
+      return res.status(400).json({ err: "A valid challenge id is required." });
+    }
+
+    const targetChallenge = await Challenges.findById(requestedId);
+    if (!targetChallenge) {
+      return res.status(404).json({ err: "Challenge not found." });
+    }
+
     const checkIfUserAlreadyHasChallenge = customerDetails.challenges.findIndex(
-      (c) => c._id.toString() === req.body.challenge._id
+      (c) => c && c._id.toString() === requestedId.toString()
     );
     // if user donest already have the challenge
     if (checkIfUserAlreadyHasChallenge < 0) {
       let updatedChallenges = [...customerDetails.challenges];
       let updatedChallengTrack = [...customerDetails.trackChallenges];
-      const freeChallenge = customerDetails.challenges.find((c) =>
-        c.access.includes("FREE")
+      // Null-safe: rows written before the input validation below could contain
+      // a null where a challenge should be.
+      const freeChallenge = customerDetails.challenges.find(
+        (c) => c && (c.access || []).includes("FREE")
       );
       // first we replace the old free challenge with new one.
       if (freeChallenge) {
@@ -1231,7 +986,7 @@ const replaceFreeChallenge = asyncHandler(async (req, res, next) => {
 
         // Remove all old group challenges
         updatedChallenges = customerDetails.challenges.filter(
-          (f) => !oldIdsToRemove.includes(f._id.toString())
+          (f) => f && !oldIdsToRemove.includes(f._id.toString())
         );
 
         // Remove track records for all old group challenges
@@ -1240,8 +995,8 @@ const replaceFreeChallenge = asyncHandler(async (req, res, next) => {
         );
 
         // Determine all IDs to add (new challenge + its group siblings)
-        const newChallengeDoc = await Challenges.findById(req.body.challenge._id);
-        let newIdsToAdd = [req.body.challenge._id];
+        const newChallengeDoc = targetChallenge;
+        let newIdsToAdd = [requestedId.toString()];
         if (newChallengeDoc && newChallengeDoc.intensityGroupId) {
           const newSiblings = await Challenges.find({
             intensityGroupId: newChallengeDoc.intensityGroupId,
@@ -1520,7 +1275,6 @@ module.exports = {
   getAllCustomers,
   updateCustomer,
   getRecommendedChallenge,
-  recommendedWeeklyDiet,
   setFavouriteRecipe,
   unfavouriteRecipe,
   getAllFavouriteRecipes,

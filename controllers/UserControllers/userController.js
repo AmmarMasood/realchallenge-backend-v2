@@ -40,18 +40,37 @@ const aws_ses = new aws.SES(sesConfig);
 //   },
 // });
 
+// The `email` argument used to be ignored: every message — password resets
+// included — went to one hardcoded personal inbox and never reached the user.
+// Recipient now comes from the caller, and sender from configuration.
+//
+// EMAIL_REDIRECT_TO exists for development, so a dev database full of real
+// addresses cannot be mailed by accident. Unset, real recipients are used.
 const sendEmail = async (email, subject, text) => {
+  const recipient = process.env.EMAIL_REDIRECT_TO || email;
+  const source = process.env.EMAIL_FROM || process.env.NODE_MAILER_EMAIL;
+
+  if (!recipient) {
+    console.warn(`[email] skipped "${subject}" — no recipient`);
+    return null;
+  }
+  if (!source) {
+    console.warn(`[email] skipped "${subject}" — EMAIL_FROM not configured`);
+    return null;
+  }
+
   const params = {
     Destination: {
-      ToAddresses: ["evilway2011@gmail.com"],
+      ToAddresses: [recipient],
     },
     Message: {
       Body: {
-        Text: { Data: text },
+        Html: { Data: text },
+        Text: { Data: String(text).replace(/<[^>]+>/g, " ") },
       },
       Subject: { Data: subject },
     },
-    Source: "ammar.masood98@gmail.com",
+    Source: source,
   };
   return aws_ses.sendEmail(params).promise();
 };

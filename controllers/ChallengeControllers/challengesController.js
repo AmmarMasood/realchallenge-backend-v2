@@ -7,7 +7,11 @@ const jwt = require("jsonwebtoken");
 const asyncHandler = require("express-async-handler");
 const { body, validationResult } = require("express-validator");
 const { roles } = require("../../utils/roles");
-const { hasRole } = require("../../middlewares/authMiddleware");
+const {
+  hasRole,
+  canViewUnpublished,
+  visibilityFilter,
+} = require("../../middlewares/authMiddleware");
 const { Challenges } = require("../../models/ChallengeModels/challengesModel");
 const { generateTranslationKey } = require("../../utils/translationKey");
 const { Trainer } = require("../../models/UserModels/trainerModel");
@@ -301,6 +305,121 @@ const getWeekByID = asyncHandler(async (req, res) => {
 
 // @desc    Get challenge by ID
 // @route   GET /api/challenges/:challengeId
+/**
+ * Whether the requester already owns this challenge.
+ *
+ * Only consulted when a challenge is not publicly visible, so the extra lookup
+ * happens on the rare path rather than on every request. Un-publishing must not
+ * take a challenge away from someone who already has it.
+ */
+const requesterOwnsChallenge = async (user, challengeId) => {
+  if (!user || !user.customerDetails) return false;
+  const { CustomerDetails } = require("../../models/UserModels/customerDetailsModel");
+  const details = await CustomerDetails.findById(user.customerDetails).select(
+    "challenges",
+  );
+  return Boolean(
+    details &&
+      (details.challenges || []).some(
+        (c) => c.toString() === challengeId.toString(),
+      ),
+  );
+};
+
+/**
+ * Removes a challenge from the platform for everyone, including people who
+ * already own it. For a trainer leaving, or content that turns out to be wrong.
+ *
+ * Distinct from un-publishing, which only stops new people finding or buying it
+ * and leaves existing owners alone.
+ *
+ * Access is withdrawn but ownership records are deliberately NOT deleted: the
+ * affected list is what support uses to issue discount codes, and wiping it
+ * would destroy the evidence of who is owed one.
+ *
+ * PUT /api/challenges/:challengeId/force-deactivate  { reason }
+ */
+const forceDeactivateChallenge = asyncHandler(async (req, res) => {
+  const challenge = await Challenges.findById(req.params.challengeId);
+  if (!challenge) {
+    res.status(404);
+    throw new Error("Challenge not found");
+  }
+
+  challenge.forceDeactivated = true;
+  challenge.forceDeactivatedAt = new Date();
+  challenge.forceDeactivatedReason = req.body.reason || "";
+  challenge.isPublic = false;
+  await challenge.save();
+
+  // Everyone who owns it, so support can issue discount codes.
+  const affectedDetails = await CustomerDetails.find({
+    challenges: challenge._id,
+  }).select("_id");
+  const detailIds = affectedDetails.map((d) => d._id);
+  const affectedUsers = await User.find({
+    customerDetails: { $in: detailIds },
+  }).select("_id username email firstName lastName");
+
+  console.log(
+    `[admin] challenge ${challenge._id} force-deactivated by ${req.user._id}; ${affectedUsers.length} owner(s) affected`,
+  );
+
+  res.status(200).json({
+    challengeId: challenge._id,
+    challengeName: challenge.challengeName,
+    forceDeactivatedAt: challenge.forceDeactivatedAt,
+    reason: challenge.forceDeactivatedReason,
+    affectedCount: affectedUsers.length,
+    affectedUsers,
+  });
+});
+
+/**
+ * Puts a force-deactivated challenge back. Owners regain access, because their
+ * ownership records were never removed.
+ *
+ * PUT /api/challenges/:challengeId/reactivate
+ */
+const reactivateChallenge = asyncHandler(async (req, res) => {
+  const challenge = await Challenges.findById(req.params.challengeId);
+  if (!challenge) {
+    res.status(404);
+    throw new Error("Challenge not found");
+  }
+
+  challenge.forceDeactivated = false;
+  challenge.forceDeactivatedAt = undefined;
+  challenge.forceDeactivatedReason = undefined;
+  await challenge.save();
+
+  // Left un-published on purpose: reactivating restores owner access, while
+  // putting it back on sale stays a separate, deliberate decision.
+  res.status(200).json({
+    challengeId: challenge._id,
+    forceDeactivated: false,
+    isPublic: challenge.isPublic,
+    note: "Owners have access again. Publish separately to put it back on sale.",
+  });
+});
+
+/**
+ * Who owns a challenge — for issuing discount codes after a deactivation, or
+ * for judging the impact before pulling it.
+ *
+ * GET /api/challenges/:challengeId/owners
+ */
+const getChallengeOwners = asyncHandler(async (req, res) => {
+  const details = await CustomerDetails.find({
+    challenges: req.params.challengeId,
+  }).select("_id");
+  const owners = await User.find({
+    customerDetails: { $in: details.map((d) => d._id) },
+  }).select("_id username email firstName lastName");
+
+  res.status(200).json({ count: owners.length, owners });
+});
+
 const getChallengeById = asyncHandler(async (req, res) => {
   const challenge = await Challenges.findById(req.params.challengeId).populate([
     "trainers",
@@ -335,6 +454,17 @@ const getChallengeById = asyncHandler(async (req, res) => {
     },
   ]);
 
+  // Drafts and unapproved challenges are hidden from everyone except staff and
+  // people who already own them. Without this, a direct id URL exposed — and
+  // allowed the purchase of — challenges that never appear in any listing.
+  if (challenge) {
+    const owns = await requesterOwnsChallenge(req.user, challenge._id);
+    if (!canViewUnpublished(challenge, req.user, { owns })) {
+      res.status(404);
+      throw new Error("Challenge not found");
+    }
+  }
+
   if (challenge) {
     const challengeObj = challenge.toObject ? challenge.toObject() : { ...challenge };
     // Determine if this challenge is the group head (first created in its intensity group)
@@ -359,10 +489,12 @@ const getChallengeById = asyncHandler(async (req, res) => {
 // // @route   GET /api/challenges/
 const getAllChallenges = asyncHandler(async (req, res) => {
   let challenges;
+  // Customers and logged-out visitors get published+approved only; staff (any
+  // non-customer role) see drafts and unapproved challenges as well.
+  const visible = visibilityFilter(req.user);
   if (req.query.language && req.query.language.length > 0) {
     challenges = await Challenges.find({
-      isPublic: true,
-      adminApproved: true,
+      ...visible,
       language: req.query.language,
     }).populate([
       "trainers",
@@ -393,10 +525,7 @@ const getAllChallenges = asyncHandler(async (req, res) => {
       },
     ]);
   } else {
-    challenges = await Challenges.find({
-      isPublic: true,
-      adminApproved: true,
-    }).populate([
+    challenges = await Challenges.find({ ...visible }).populate([
       "trainers",
       "body",
       "tags",
@@ -724,7 +853,10 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
           ? req.body.description
           : challenge.description,
         access: req.body.access ? req.body.access : challenge.access,
-        price: req.body.price ? req.body.price : challenge.price,
+        // `!== undefined`, not truthiness: a price of 0 is legitimate (a free
+        // challenge) and a truthy test silently kept the old price instead.
+        price:
+          req.body.price !== undefined ? req.body.price : challenge.price,
         points: req.body.points ? req.body.points : challenge.points,
         currency: req.body.currency ? req.body.currency : challenge.currency,
         thumbnailLink: req.body.thumbnailLink
@@ -741,9 +873,19 @@ const updateChallenge = asyncHandler(async (req, res, next) => {
           ? req.body.difficulty
           : challenge.difficulty,
         results: req.body.results ? req.body.results : challenge.results,
-        allowComments: req.body.allowComments,
-        allowReviews: req.body.allowReviews,
-        isPublic: req.body.isPublic,
+        // These three had no fallback to the stored value, so any update that
+        // did not resend them wiped them — a partial PUT silently unpublished
+        // the challenge and it vanished from every customer's catalogue.
+        allowComments:
+          req.body.allowComments !== undefined
+            ? req.body.allowComments
+            : challenge.allowComments,
+        allowReviews:
+          req.body.allowReviews !== undefined
+            ? req.body.allowReviews
+            : challenge.allowReviews,
+        isPublic:
+          req.body.isPublic !== undefined ? req.body.isPublic : challenge.isPublic,
         adminApproved: isAdmin
           ? (req.body.adminApproved !== undefined ? req.body.adminApproved : challenge.adminApproved)
           : false,
@@ -1053,7 +1195,12 @@ const getChallengeByTranslationKey = asyncHandler(async (req, res) => {
     },
   ]);
 
-  if (challenge) {
+  // Same visibility rule as getChallengeById — otherwise the translation lookup
+  // is a second way to reach an unpublished challenge.
+  const ownsTranslated = challenge
+    ? await requesterOwnsChallenge(req.user, challenge._id)
+    : false;
+  if (challenge && canViewUnpublished(challenge, req.user, { owns: ownsTranslated })) {
     res.json(challenge);
   } else {
     res.status(404);
@@ -1114,8 +1261,7 @@ const getIntensityGroups = asyncHandler(async (req, res) => {
 const getChallengesByGroup = asyncHandler(async (req, res) => {
   const challenges = await Challenges.find({
     intensityGroupId: req.params.groupId,
-    isPublic: true,
-    adminApproved: true,
+    ...visibilityFilter(req.user),
   }).select("_id challengeName intensity intensityGroupId thumbnailLink").sort({ _id: 1 }).lean();
   // Mark the first challenge (oldest _id) as the group head
   if (challenges.length > 0) {
@@ -1299,6 +1445,9 @@ const releaseEditLockBeacon = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  forceDeactivateChallenge,
+  reactivateChallenge,
+  getChallengeOwners,
   createChallenge,
   getChallengeById,
   getAllChallenges,

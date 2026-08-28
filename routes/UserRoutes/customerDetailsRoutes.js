@@ -7,7 +7,6 @@ const {
   getAllCustomers,
   updateCustomer,
   getRecommendedChallenge,
-  recommendedWeeklyDiet,
   setFavouriteRecipe,
   unfavouriteRecipe,
   getAllFavouriteRecipes,
@@ -44,11 +43,9 @@ router.get(
 
   getRecommendedChallenge
 );
-router.get(
-  "/recommendedWeeklyDiet/:customerId",
-  // protect,
-  recommendedWeeklyDiet
-);
+// REMOVED: GET /recommendedWeeklyDiet/:customerId — see the note in
+// customerDetailsController.js. Meal plans are served by /api/meal-plan.
+// (It was also unauthenticated, which is why `protect` is commented out above.)
 router.post("/swap/:customerId", protect, swapRecipe);
 // TODO PLEASE FIX THIS PROTECTION AMD TEST AGAIN
 router.get("/:customerId", getCustomerById);

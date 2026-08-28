@@ -60,6 +60,8 @@ if (process.env.NODE_ENV === "development") {
 }
 // app.use(express.static("uploads/images"));
 app.use(express.json());
+// Mollie posts webhooks as application/x-www-form-urlencoded, not JSON.
+app.use(express.urlencoded({ extended: false }));
 // enables cors
 app.use(cors());
 
@@ -133,6 +135,11 @@ app.listen(PORT, () => {
   const {
     startWeekTransitionScheduler,
   } = require("./services/mealPlanScheduler");
+
+  const {
+    startRenewalReminderScheduler,
+  } = require("./services/renewalReminder");
+  startRenewalReminderScheduler();
   startWeekTransitionScheduler();
 
   // MediaConvert polling — check job status every 30 seconds

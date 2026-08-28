@@ -4,6 +4,9 @@ const router = express.Router();
 const {
   createChallenge,
   getChallengeById,
+  forceDeactivateChallenge,
+  reactivateChallenge,
+  getChallengeOwners,
   getAllChallenges,
   updateChallenge,
   deleteChallenge,
@@ -23,7 +26,11 @@ const {
   renewEditLock,
   releaseEditLockBeacon,
 } = require("../../controllers/ChallengeControllers/challengesController");
-const { protect } = require("../../middlewares/authMiddleware");
+const {
+  protect,
+  optionalAuth,
+  admin,
+} = require("../../middlewares/authMiddleware");
 
 router.post(
   "/create",
@@ -32,18 +39,31 @@ router.post(
   createChallenge
 );
 
-router.get("/", getAllChallenges);
+router.get("/", optionalAuth, getAllChallenges);
 router.get("/intensity-groups", protect, getIntensityGroups);
-router.get("/group/:groupId", getChallengesByGroup);
+router.get("/group/:groupId", optionalAuth, getChallengesByGroup);
 router.get("/users/all", protect, getAllUserChallenges);
 router.get("/translations/:translationKey", getTranslationsByKey);
-router.get("/translation/:translationKey/:language", getChallengeByTranslationKey);
+// optionalAuth (not protect): these stay public, but need to know the caller so
+// an admin/owning trainer can still preview an unpublished challenge.
+router.get(
+  "/translation/:translationKey/:language",
+  optionalAuth,
+  getChallengeByTranslationKey
+);
 router.get("/:challengeId/version", protect, getChallengeVersion);
 router.post("/:challengeId/lock", protect, acquireEditLock);
 router.put("/:challengeId/lock", protect, renewEditLock);
 router.delete("/:challengeId/lock", protect, releaseEditLock);
 router.post("/:challengeId/unlock", releaseEditLockBeacon);
-router.get("/:challengeId", getChallengeById);
+// Admin only. Force-deactivate removes a challenge for everyone including
+// existing owners; un-publishing (isPublic) is the softer action that only stops
+// new sales. Owners are returned so support can issue discount codes.
+router.get("/:challengeId/owners", protect, admin, getChallengeOwners);
+router.put("/:challengeId/force-deactivate", protect, admin, forceDeactivateChallenge);
+router.put("/:challengeId/reactivate", protect, admin, reactivateChallenge);
+
+router.get("/:challengeId", optionalAuth, getChallengeById);
 router.get("/:challengeId/:weekId", getWeekByID);
 router.put("/:challengeId", protect, updateChallenge);
 router.post("/:id/reviews", protect, createChallengeReview);

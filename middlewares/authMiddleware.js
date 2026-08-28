@@ -92,6 +92,67 @@ const protect = asyncHandler(async (req, res, next) => {
   }
 });
 
+/**
+ * Populates req.user when a valid token is present, and simply continues when
+ * it is not. For endpoints that must stay reachable by logged-out visitors but
+ * still need to know who is asking — e.g. showing an unpublished challenge to
+ * the admin previewing it while hiding it from everyone else.
+ */
+const optionalAuth = asyncHandler(async (req, res, next) => {
+  const header = req.headers.authorization;
+  if (header && header.startsWith("Bearer")) {
+    try {
+      const decoded = jwt.verify(header.split(" ")[1], process.env.JWT_SECRET);
+      req.user = await User.findById(decoded.id).select("-passwordHash");
+    } catch (error) {
+      // An invalid or expired token is treated as "not logged in" rather than
+      // an error, so public pages keep working with a stale token in storage.
+      req.user = undefined;
+    }
+  }
+  next();
+});
+
+/**
+ * Staff = any signed-in user who is not purely a customer. Mirrors the rule in
+ * `allowAllExceptCustomer`: ["customer"] alone is a customer, ["customer",
+ * "trainer"] is staff. Logged-out visitors are never staff.
+ */
+const isStaff = (user) => {
+  if (!user || !Array.isArray(user.roles)) return false;
+  return user.roles.some((role) => role !== "customer");
+};
+
+/**
+ * True when a challenge/recipe may be shown to the given user. Customers and
+ * logged-out visitors only ever see published, admin-approved items; staff see
+ * everything, drafts and unapproved included.
+ */
+const canViewUnpublished = (doc, user, { owns = false } = {}) => {
+  if (!doc) return false;
+
+  // Force-deactivated is gone for everyone. Staff still see it so they can
+  // manage the fallout; customers lose it even if they bought it.
+  if (doc.forceDeactivated) return isStaff(user);
+
+  if (doc.isPublic && doc.adminApproved) return true;
+
+  // Un-publishing only closes the door to new people: anyone who already owns
+  // the challenge keeps what they paid for.
+  if (owns) return true;
+
+  return isStaff(user);
+};
+
+/**
+ * Mongo filter restricting a query to what the given user may see. Spread into
+ * a `find()` — empty for staff, so they get everything.
+ */
+const visibilityFilter = (user) =>
+  isStaff(user)
+    ? {}
+    : { isPublic: true, adminApproved: true, forceDeactivated: { $ne: true } };
+
 //Allow access for blogCreation
 const allowBlogRoutesAccess = asyncHandler(async (req, res, next) => {
   let token;
@@ -239,6 +300,10 @@ const shopManager = (req, res, next) => {
 
 module.exports = {
   protect,
+  optionalAuth,
+  canViewUnpublished,
+  visibilityFilter,
+  isStaff,
   admin,
   trainer,
   nutrist,

@@ -2,14 +2,28 @@ const mongoose = require("mongoose");
 
 const customerDetailsSchema = mongoose.Schema(
   {
+    // Exactly one canonical goal slug — see utils/goals.js. Stored as an array
+    // for historical reasons; the signup wizard and profile page are both
+    // single-select.
     goals: [
       {
         type: String,
       },
     ],
+    // Activity level used to derive daily calories (calculateCalories(BMR, …)).
+    // NOT a training-difficulty rating — do not use it to match challenge
+    // intensity; preferredIntensity below is the field for that.
     currentFitnessLevel: [
       {
         type: String,
+      },
+    ],
+    // Optional. Feeds the challenge recommender's intensity signal; when unset
+    // the signal is skipped rather than guessed at.
+    preferredIntensity: [
+      {
+        type: String,
+        enum: ["Easy", "Medium", "Hard"],
       },
     ],
     age: {
@@ -96,6 +110,21 @@ const customerDetailsSchema = mongoose.Schema(
         },
       },
     ],
+    // Nutrition tab access for users without a subscription.
+    //
+    // Subscribers are not governed by this at all — an active plan grants the
+    // Nutrition tab outright. This is the balance bought by one-off purchases:
+    // each paid single challenge adds 30 days, stacking onto whatever is left so
+    // nobody loses days they paid for.
+    nutritionAccessUntil: {
+      type: Date,
+    },
+    // Free accounts get one 30-day taste of the Nutrition tab, ever. Starting
+    // another free challenge later does not grant a second one.
+    freeNutritionTrialUsed: {
+      type: Boolean,
+      default: false,
+    },
     completedChallenges: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -204,13 +233,19 @@ const customerDetailsSchema = mongoose.Schema(
       default: false,
     },
 
-    // Selected trainer-goal interests (Bootcamp, Boxing, Strength, …).
-    // Originally captured in the signup wizard and previously dropped by
-    // Mongoose strict-mode because the field wasn't on the schema.
+    // Disciplines the customer is interested in (Boxing, Strength, HIIT, …).
+    // Captured in the signup wizard and editable in the profile.
+    //
+    // This is the PRIMARY signal of the challenge recommender (weight 40): it
+    // is matched against `challenge.trainersFitnessInterest`. Both sides now
+    // reference the canonical `Discipline` collection — they used to point at
+    // `TrainerGoal`, which is trainer-scoped, so the same discipline existed
+    // once per trainer and the join broke as soon as two trainers named the
+    // same thing. Field name kept for compatibility with existing callers.
     fitnessInterests: [
       {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "TrainerGoal",
+        ref: "Discipline",
       },
     ],
 

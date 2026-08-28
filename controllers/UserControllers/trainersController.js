@@ -90,7 +90,7 @@ const getTrainerById = asyncHandler(async (req, res) => {
         isPublic: true,
         adminApproved: true,
       }).select(
-        "challengeName thumbnailLink videoThumbnailLink informationList rating fitnessInterests intensityGroupId intensity language"
+        "challengeName thumbnailLink videoThumbnailLink informationList rating trainersFitnessInterest intensityGroupId intensity language"
       );
 
       // Deduplicate by intensityGroupId and attach intensityVariants
