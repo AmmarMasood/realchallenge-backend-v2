@@ -43,6 +43,20 @@ const pendingOrderSchema = mongoose.Schema(
         ref: "Challenges",
       },
     ],
+    // EU distance selling gives a consumer 14 days to withdraw. Digital content
+    // delivered immediately is exempt ONLY if the buyer expressly consented to
+    // immediate delivery and acknowledged losing that right — and the seller has
+    // to be able to show they did. Hence the timestamp and the exact wording
+    // shown, not just a boolean: consent to text you can no longer produce is
+    // not evidence of anything.
+    consent: {
+      givenAt: { type: Date },
+      // The literal sentence the buyer ticked, so a later dispute can be
+      // answered with what they actually agreed to rather than today's copy.
+      text: { type: String },
+      locale: { type: String },
+    },
+
     // Held until the payment is confirmed, then redeemed. Validating a coupon
     // must not spend it — the customer may never finish the checkout.
     coupon: {

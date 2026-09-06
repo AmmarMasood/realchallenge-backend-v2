@@ -64,7 +64,10 @@ router.put("/:challengeId/force-deactivate", protect, admin, forceDeactivateChal
 router.put("/:challengeId/reactivate", protect, admin, reactivateChallenge);
 
 router.get("/:challengeId", optionalAuth, getChallengeById);
-router.get("/:challengeId/:weekId", getWeekByID);
+// optionalAuth so the controller can identify the caller and refuse a
+// non-owner. Not `protect`: staff and owning trainers reach it too, and the
+// controller decides, not the router.
+router.get("/:challengeId/:weekId", optionalAuth, getWeekByID);
 router.put("/:challengeId", protect, updateChallenge);
 router.post("/:id/reviews", protect, createChallengeReview);
 router.post("/:id/comments", protect, createChallengeComment);

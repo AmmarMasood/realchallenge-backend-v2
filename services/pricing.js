@@ -40,6 +40,35 @@ const formatMoney = (amount, currency) =>
   toCurrencySymbol(currency) + Number(amount || 0).toFixed(2);
 
 /** The VAT rate for a country, from config, falling back sensibly. */
+/**
+ * Which country's VAT applies to an EU B2C sale of digital services.
+ *
+ * NOT simply "wherever the customer lives". A business established in one member
+ * state whose cross-border B2C digital sales stay under EUR 10,000 for the year
+ * may charge its OWN rate to every EU customer, and only switches to the
+ * customer's rate once that threshold is passed or it opts in voluntarily.
+ *
+ * So this is a business position, not something derivable from an address, and
+ * charging a German customer 19% purely because they typed a German address is
+ * wrong while the seller is still below the threshold.
+ *
+ * `domestic`    - always the seller's own rate. The correct default: it is what
+ *                 the system did before addresses existed, and it is right for
+ *                 any seller under the threshold who has not opted in.
+ * `destination` - the customer's own country rate. Correct once registered for
+ *                 OSS, over the threshold, or voluntarily opted in.
+ *
+ * Non-EU customers are a separate question this does not attempt to answer.
+ */
+const VAT_MODE = (process.env.VAT_MODE || "domestic").toLowerCase();
+const SELLER_COUNTRY = (process.env.SELLER_VAT_COUNTRY || DEFAULT_COUNTRY).toUpperCase();
+
+/** The country whose rate applies, given the mode and the customer's country. */
+const vatCountryFor = (customerCountry) =>
+  VAT_MODE === "destination"
+    ? (customerCountry || SELLER_COUNTRY).toUpperCase()
+    : SELLER_COUNTRY;
+
 const vatRateFor = async (countryCode) => {
   const code = (countryCode || DEFAULT_COUNTRY).toUpperCase();
 
@@ -63,7 +92,11 @@ const vatRateFor = async (countryCode) => {
  * always add back to the gross exactly.
  */
 const vatBreakdown = async (grossAmount, countryCode, currency) => {
-  const ratePercent = await vatRateFor(countryCode);
+  // The customer's country is recorded either way — it is needed to know when
+  // the EUR 10,000 threshold is crossed — but it only drives the RATE in
+  // destination mode.
+  const applicable = vatCountryFor(countryCode);
+  const ratePercent = await vatRateFor(applicable);
   const gross = Math.round(Number(grossAmount || 0) * 100) / 100;
   const net = Math.round((gross / (1 + ratePercent / 100)) * 100) / 100;
 
@@ -72,12 +105,20 @@ const vatBreakdown = async (grossAmount, countryCode, currency) => {
     net,
     vatAmount: Math.round((gross - net) * 100) / 100,
     ratePercent,
-    countryCode: (countryCode || DEFAULT_COUNTRY).toUpperCase(),
+    // The country the rate came from — the seller's in domestic mode.
+    countryCode: applicable,
+    // Where the customer actually is, always recorded, so cross-border turnover
+    // can be measured against the threshold regardless of mode.
+    customerCountry: (countryCode || "").toUpperCase() || null,
+    vatMode: VAT_MODE,
     currency: toCurrencyCode(currency),
   };
 };
 
 module.exports = {
+  VAT_MODE,
+  SELLER_COUNTRY,
+  vatCountryFor,
   SUPPORTED_CURRENCIES,
   DEFAULT_CURRENCY,
   toCurrencyCode,

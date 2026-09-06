@@ -109,6 +109,33 @@ const userSchema = mongoose.Schema(
       type: String,
       required: false,
     },
+    // Billing address. Required on a VAT invoice by law, and by Mollie's sales
+    // invoice API, which is why invoicing could not run until these existed.
+    // `country` above doubles as the billing country and drives the VAT rate —
+    // EU digital services are taxed where the CUSTOMER is, not the seller.
+    streetAndNumber: {
+      type: String,
+      required: false,
+      trim: true,
+    },
+    postalCode: {
+      type: String,
+      required: false,
+      trim: true,
+    },
+    city: {
+      type: String,
+      required: false,
+      trim: true,
+    },
+    // Optional. A business with a valid EU VAT number outside the seller's
+    // country is reverse-charged: 0% VAT, they account for it themselves.
+    vatNumber: {
+      type: String,
+      required: false,
+      trim: true,
+      uppercase: true,
+    },
     // IANA zone (e.g. "Europe/Amsterdam"). All week/"today" logic resolves
     // through utils/weekTime, which falls back to GMT when this is empty.
     timeZone: {

@@ -13,6 +13,12 @@ const {
   visibilityFilter,
 } = require("../../middlewares/authMiddleware");
 const { Challenges } = require("../../models/ChallengeModels/challengesModel");
+const {
+  applyContentAccess,
+  applyContentAccessToList,
+  canPlayChallenge,
+  ownedChallengeIds,
+} = require("../../services/challengeAccess");
 const { generateTranslationKey } = require("../../utils/translationKey");
 const { Trainer } = require("../../models/UserModels/trainerModel");
 const {
@@ -255,6 +261,10 @@ const createChallenge = asyncHandler(async (req, res, next) => {
 
 // @desc    Get week by ID from challenges
 // @route   GET /api/challenges/:challengeId/:weekId
+// This is the endpoint that actually delivers a week's workouts, so unlike the
+// catalogue it does not redact — it refuses. It had no `protect`, no ownership
+// check and no visibility check, so anyone who knew a challenge id and week id
+// (both handed out by the public detail endpoint) could read the paid content.
 const getWeekByID = asyncHandler(async (req, res) => {
   const challenge = await Challenges.findById(req.params.challengeId).populate([
     {
@@ -278,6 +288,14 @@ const getWeekByID = asyncHandler(async (req, res) => {
     },
   ]);
   if (challenge) {
+    // Force-deactivated content is gone for everyone but staff; drafts are only
+    // visible to staff and the owning trainer.
+    const owned = await ownedChallengeIds(req.user);
+    if (!canPlayChallenge(challenge, req.user, owned)) {
+      res.status(403);
+      throw new Error("You do not have access to this challenge.");
+    }
+
     const weeksArray = challenge.weeks;
     // console.log(weeksArray);
     // const week = weeksArray.find((week) => week._id === req.params.weekId);
@@ -478,7 +496,12 @@ const getChallengeById = asyncHandler(async (req, res) => {
         challengeObj.groupHeadId = headChallenge._id;
       }
     }
-    res.json(challengeObj);
+    // Strip playable media for anyone who does not own this challenge. The
+    // structure (week names, workout titles, durations) stays — that is the
+    // sales pitch — but the video and audio URLs do not, because this endpoint
+    // is public and was handing the paid product to anyone who asked.
+    const owned = await ownedChallengeIds(req.user);
+    res.json(applyContentAccess(challengeObj, req.user, owned));
   } else {
     res.status(404);
     throw new Error("Challenge not found");
@@ -587,8 +610,11 @@ const getAllChallenges = asyncHandler(async (req, res) => {
       result.push(rep);
     }
 
+    // Same redaction as the detail endpoint. This one mattered most: a single
+    // unauthenticated call to the catalogue returned every video URL on the
+    // platform, so the whole paid library was free to anyone using the API.
     res.status(200).json({
-      challenges: result,
+      challenges: await applyContentAccessToList(result, req.user),
     });
   } else {
     res.status(404);

@@ -429,11 +429,50 @@ const getUserProfile = asyncHandler(async (req, res) => {
 // @desc    Update User by Id
 // @route   GET /api/users/:id
 // @access  Private
+// Fields a user may change about themselves. Everything else is ignored.
+//
+// This was `update = req.body` applied wholesale, which let any logged-in
+// customer send `{ "roles": ["admin"] }` to their own profile and become an
+// administrator. `roles`, `role`, `isActive`, `points`, `passwordHash`,
+// `mollieId`, `subcriptionId` and `customerDetails` are all privilege- or
+// billing-bearing and must never be settable from a profile form.
+const USER_EDITABLE_FIELDS = [
+  "firstName",
+  "lastName",
+  "gender",
+  "avatarLink",
+  "heroBanner",
+  "videoTrailerLink",
+  "motto",
+  "bio",
+  "timeZone",
+  // Billing address
+  "country",
+  "streetAndNumber",
+  "postalCode",
+  "city",
+  "vatNumber",
+];
+
+const pickEditableFields = (body = {}) =>
+  USER_EDITABLE_FIELDS.reduce((acc, key) => {
+    if (body[key] !== undefined) acc[key] = body[key];
+    return acc;
+  }, {});
+
 const updateUserProfile = asyncHandler(async (req, res, next) => {
   try {
-    const update = req.body;
-    console.log("update", update);
+    const update = pickEditableFields(req.body);
     const userId = req.params.userId;
+
+    // An admin may legitimately edit anyone; a user may only edit themselves.
+    // The route's `updateOwn` grant does not check the id in the path.
+    const isAdmin =
+      req.user && Array.isArray(req.user.roles) && req.user.roles.includes("admin");
+    if (!isAdmin && req.user && req.user._id.toString() !== userId) {
+      return res.status(403).json({ message: "You can only edit your own profile." });
+    }
+
     await User.findByIdAndUpdate(userId, update, { useFindAndModify: false });
     const user = await User.findById(userId);
     res.status(200).json({

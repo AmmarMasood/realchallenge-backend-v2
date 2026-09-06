@@ -14,6 +14,7 @@ const {
   recoverSubscription,
   cancelChallenge,
   swapChallenge,
+  adminRevokeChallengeAccess,
   getSwapEligibility,
   createFirstPayment,
   getPaymentStatus,
@@ -22,7 +23,7 @@ const {
   getCustomerSubscribtionInformation,
 } = require("../../controllers/SubscriptionController/subscriptionController");
 
-const { protect } = require("../../middlewares/authMiddleware");
+const { protect, admin } = require("../../middlewares/authMiddleware");
 
 router.get("/oauth2/authorize", authorizeApp);
 router.get("/payment/status", getPaymentStatus);
@@ -56,6 +57,14 @@ router.post("/subscription/recover", protect, recoverSubscription);
 router.get("/challenge/swap-eligibility", protect, getSwapEligibility);
 router.post("/challenge/cancel", protect, cancelChallenge);
 router.post("/challenge/swap", protect, swapChallenge);
+// Admin: the other half of a refund. Refunds are issued by hand in Mollie and
+// the credit note is automatic, but nothing removed the customer's access.
+router.post(
+  "/admin/revoke-challenge",
+  protect,
+  admin,
+  adminRevokeChallengeAccess
+);
 
 // router.put("/:bodyId", updateBody);
 // router.get("/:bodyId", getBodyById);

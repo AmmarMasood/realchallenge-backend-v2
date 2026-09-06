@@ -312,6 +312,29 @@ const getAccessToken = () => {
   }
 };
 
+/**
+ * Mollie's billingAddress shape, or null when we do not have a complete one.
+ *
+ * All-or-nothing on purpose: Mollie rejects a partial address rather than
+ * ignoring it, so a half-filled profile must send nothing at all.
+ */
+const billingAddressFor = (user) => {
+  if (!user) return null;
+  const streetAndNumber = user.streetAndNumber || user.address;
+  if (!streetAndNumber || !user.postalCode || !user.city || !user.country) {
+    return null;
+  }
+  return {
+    givenName: user.firstName || user.username || "Customer",
+    familyName: user.lastName || "-",
+    streetAndNumber,
+    postalCode: user.postalCode,
+    city: user.city,
+    country: String(user.country).toUpperCase(),
+    email: user.email,
+  };
+};
+
 const createPayment = async (
   currency,
   value,
@@ -322,6 +345,11 @@ const createPayment = async (
   // for subscription packages; a one-off challenge purchase must not leave a
   // mandate behind (it used to, which is how "Billed once" became monthly).
   sequenceType = "first",
+  // The buyer's billing address. Mollie never collects one for iDEAL, card or
+  // SEPA — it is a field we SEND, and their guidance is to send it because it
+  // improves fraud scoring and conversion. It is also what pay-later methods
+  // (Klarna, in3, Riverty) require, so passing it keeps that door open.
+  billingAddress = null,
 ) => {
   try {
     const webhookUrl = mollieWebhookUrl();
@@ -343,6 +371,9 @@ const createPayment = async (
       // required a code change.
       sequenceType,
       customerId: custId,
+      // Omitted entirely when incomplete: a partial address is worse than none,
+      // as Mollie rejects the call rather than ignoring the field.
+      ...(billingAddress ? { billingAddress } : {}),
     });
     if (payment) {
       return payment;
@@ -455,6 +486,7 @@ const createFirstPayment = async (req, res) => {
       redirectUrl,
       mollieId,
       isSubscriptionPackage(packageType) ? "first" : "oneoff",
+      billingAddressFor(user),
     );
 
     if (!paymentInfo) {
@@ -477,6 +509,15 @@ const createFirstPayment = async (req, res) => {
       paymentId: paymentInfo.id,
       packageType,
       challenges: challengeIds,
+      // Recorded with the order rather than the user: consent is given per
+      // purchase, and the wording may change between purchases.
+      consent: req.body.consent && req.body.consent.text
+        ? {
+            givenAt: new Date(),
+            text: String(req.body.consent.text).slice(0, 1000),
+            locale: req.body.consent.locale || null,
+          }
+        : undefined,
       // Redeemed at fulfilment, not now: applying a coupon happens before the
       // user reaches Mollie, so spending it here burned the code on every
       // abandoned checkout.
@@ -1047,7 +1088,7 @@ const syncSubscriptionFromMollie = async (subscriptionId) => {
  * Mollie retries; they are told a retry is coming rather than invited to pay
  * again, because a second payment alongside a retry can double-charge them.
  */
-const markPaymentFailed = async (user, membership) => {
+const markPaymentFailed = async (user, membership, { reversed = false } = {}) => {
   if (!membership) return;
   // Keep the original failure date — the clock starts at the first failure, not
   // at each retry, otherwise the grace period never ends.
@@ -1065,7 +1106,10 @@ const markPaymentFailed = async (user, membership) => {
   console.log(
     `[billing] payment failed for user ${user._id}; grace until ${graceUntil.toISOString()}`,
   );
-  await emails.paymentFailed(user, {
+  // A chargeback is not a retryable failure: Mollie will not try again and the
+  // customer asked for the money back, so the "we'll retry, check your balance"
+  // wording would be wrong.
+  await (reversed ? emails.paymentReversed : emails.paymentFailed)(user, {
     amount: membership.price,
     currency: membership.currency,
     graceUntil,
@@ -1332,6 +1376,71 @@ const handleWebhook = async (req, res) => {
       }
     }
 
+    // A chargeback: the payer told their bank to reverse a collected direct
+    // debit, which SEPA allows for eight weeks. This is NOT a refund — the
+    // payment stays `paid` and `amountRefunded` stays 0 — so checking only for
+    // refunds let a reversal pass silently, leaving the customer with full
+    // access and the books showing income that had gone back.
+    const chargedBack =
+      payment.amountChargedBack && Number(payment.amountChargedBack.value) > 0;
+
+    if (chargedBack) {
+      const amount = Number(payment.amountChargedBack.value);
+      // Idempotent: a repeated webhook returns the existing note rather than
+      // crediting twice.
+      await issueCreditNote(paymentId, {
+        amount,
+        reason: `Chargeback for payment ${paymentId}`,
+      });
+
+      // Money has left the account, so this must always leave a trace even when
+      // we cannot tie it to anything — an unattributable chargeback is exactly
+      // the case someone needs to look at by hand.
+      console.warn(
+        `[billing] CHARGEBACK ${amount} ${payment.amountChargedBack.currency} on ${paymentId}` +
+          (payment.subscriptionId ? ` (subscription ${payment.subscriptionId})` : " (no subscription)"),
+      );
+
+      // The order is the best link, but a renewal has no order — fall back to
+      // the Mollie customer, which every recurring collection carries.
+      let owner = order ? await User.findById(order.user).catch(() => null) : null;
+      if (!owner && payment.customerId) {
+        owner = await User.findOne({ mollieId: payment.customerId }).catch(() => null);
+      }
+
+      if (payment.subscriptionId) {
+        // Treat it as a failed payment: same grace clock, so a reversal made by
+        // mistake can be put right, and an intentional one still ends in a lock.
+        const synced = await syncSubscriptionFromMollie(payment.subscriptionId);
+        if (synced) {
+          await markPaymentFailed(synced.user, synced.membership, { reversed: true });
+        }
+      } else if (owner) {
+        // No subscription on the payment. If the user holds a plan, treat it as
+        // a failed payment for that plan; otherwise this was a one-off, which is
+        // permanent by design — revoking it is a bigger call than this webhook
+        // should make unprompted, so it is flagged for a human instead.
+        const holder = await User.findById(owner._id).populate({
+          path: "customerDetails",
+          populate: { path: "membership" },
+        });
+        const membership = findSubscriptionMembership(holder && holder.customerDetails);
+
+        if (membership) {
+          await markPaymentFailed(holder, membership, { reversed: true });
+        } else {
+          console.warn(
+            `[billing] chargeback on a one-off purchase by user ${owner._id} — ` +
+              "access left in place, needs review",
+          );
+        }
+      } else {
+        console.warn(
+          `[billing] chargeback ${paymentId} could not be attributed to a user — needs review`,
+        );
+      }
+    }
+
     // Any payment tied to a subscription — the first charge or a later renewal
     // — is a chance to re-check that the subscription is still healthy.
     if (payment.subscriptionId) {
@@ -1339,7 +1448,10 @@ const handleWebhook = async (req, res) => {
       // Only a recurring charge advances the term. The very first payment is
       // already counted when the membership is created.
       if (synced && payment.sequenceType === "recurring") {
-        if (payment.isPaid()) {
+        // `isPaid()` is still true for a charged-back payment — the money went
+        // out and then came back. Without this guard the reversal handled above
+        // would be undone here, restoring the very access it just withdrew.
+        if (payment.isPaid() && !chargedBack) {
           await markPaymentRestored(synced.user, synced.membership);
           await recordSuccessfulCharge(synced.user, synced.membership);
         } else if (["failed", "expired", "canceled"].includes(payment.status)) {
@@ -1541,6 +1653,7 @@ const recoverSubscription = async (req, res) => {
       req.body.redirectUrl,
       user.mollieId,
       "first",
+      billingAddressFor(user),
     );
     if (!payment) {
       return res.status(400).json({ message: "Could not start the payment." });
@@ -1646,6 +1759,83 @@ const loadUserForSwap = async (userId) =>
  * Drops a just-started challenge and frees the slot.
  * POST { challengeId }
  */
+/**
+ * Admin: takes a challenge away from one customer.
+ *
+ * The counterpart to a refund. Refunds are issued by hand in the Mollie
+ * dashboard and a credit note is raised automatically from the webhook, but
+ * nothing removed the customer's access — so a refunded customer kept the
+ * product. This is that missing half.
+ *
+ * Deliberately NOT the same as the customer-facing cancel: there is no 24-hour
+ * window and no workout limit, because an admin acting on a refund is not
+ * bound by the swap rules. It frees the plan slot if the challenge came from
+ * one, and simply removes ownership if it was a one-off purchase.
+ */
+const adminRevokeChallengeAccess = async (req, res) => {
+  try {
+    const { userId, challengeId } = req.body;
+    if (!userId || !challengeId) {
+      return res
+        .status(400)
+        .json({ message: "userId and challengeId are required." });
+    }
+
+    const user = await User.findById(userId).populate({
+      path: "customerDetails",
+      populate: { path: "membership" },
+    });
+    if (!user || !user.customerDetails) {
+      return res.status(404).json({ message: "Customer not found." });
+    }
+
+    const owned = (user.customerDetails.challenges || []).map((c) =>
+      (c._id || c).toString(),
+    );
+    if (!owned.includes(challengeId.toString())) {
+      return res
+        .status(404)
+        .json({ message: "This customer does not own that challenge." });
+    }
+
+    await CustomerDetails.updateOne(
+      { _id: user.customerDetails._id },
+      { $pull: { challenges: challengeId } },
+    );
+
+    // If it came from a plan, give the slot back rather than leaving it burnt.
+    const membership = findSubscriptionMembership(user.customerDetails);
+    let slotFreed = false;
+    if (membership) {
+      const before = (membership.challenges || []).length;
+      await Membership.updateOne(
+        { _id: membership._id },
+        { $pull: { challenges: { challenge: challengeId } } },
+      );
+      const after = await Membership.findById(membership._id).select("challenges");
+      slotFreed = (after?.challenges || []).length < before;
+    }
+
+    const challenge = await Challenges.findById(challengeId).select("challengeName");
+    console.log(
+      `[admin] ${req.user._id} revoked "${challenge?.challengeName}" from user ${userId}` +
+        (slotFreed ? " (plan slot freed)" : ""),
+    );
+
+    return res.status(200).json({
+      revoked: true,
+      challengeId,
+      challengeName: challenge?.challengeName || null,
+      slotFreed,
+    });
+  } catch (err) {
+    console.error("adminRevokeChallengeAccess failed:", err);
+    return res
+      .status(500)
+      .json({ message: "Could not revoke access.", reason: err.message });
+  }
+};
+
 const cancelChallenge = async (req, res) => {
   try {
     const { challengeId } = req.body;
@@ -1960,6 +2150,7 @@ module.exports = {
   recoverSubscription,
   cancelChallenge,
   swapChallenge,
+  adminRevokeChallengeAccess,
   getSwapEligibility,
   getPaymentStatus,
   listSubscriptionPayments,

@@ -146,6 +146,23 @@ const emails = {
       "If you'd rather it didn't continue, you can cancel from your account settings before then.",
     ]),
 
+  /**
+   * A SEPA payer can reverse a collected direct debit for eight weeks. That is
+   * NOT a failed payment — Mollie will not retry it, and the customer chose it —
+   * so `paymentFailed`'s "we'll try again, check your balance" wording would be
+   * both wrong and slightly accusatory.
+   */
+  paymentReversed: (user, { amount, currency, graceUntil }) =>
+    send(user.email, "Your payment was returned", [
+      greeting(user),
+      `Your bank returned the ${money(amount, currency)} payment for your subscription.`,
+      "If you asked for that, there is nothing to do — your plan will simply stop.",
+      graceUntil
+        ? `If it was not intentional, you can set your payment up again from your account settings before ${formatDate(graceUntil)} and keep your access.`
+        : "If it was not intentional, you can set your payment up again from your account settings.",
+      "The challenges you have already unlocked stay yours either way.",
+    ]),
+
   refundIssued: (user, { amount, currency, description }) =>
     send(user.email, "Your refund has been processed", [
       greeting(user),
