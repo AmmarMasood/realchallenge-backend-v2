@@ -2,6 +2,7 @@ const AWS = require("aws-sdk");
 const MediaFiles = require("../models/MediaManagerModels/mediaFileModel");
 const UserVideoJob = require("../models/MediaManagerModels/userVideoJobModel");
 const { invalidateCloudFrontCache } = require("../config/s3");
+const { storageKey, storagePrefix } = require("../utils/mediaStorage");
 
 const bucketName = process.env.AWS_BUCKET_NAME;
 const bucketRegion = process.env.AWS_BUCKET_REGION;
@@ -343,12 +344,17 @@ async function promoteTranscodeOutput(outputPrefix, originalKey) {
  * promote the output over the original key, then update the DB record.
  */
 async function handleJobComplete(file, job) {
-  const folderId = file.folderId.toString();
-  const originalKey = `${folderId}/${file.filename}`;
+  // Both the source object and the job's temporary output live under the prefix
+  // the file was UPLOADED to. That is not necessarily `file.folderId`: a move
+  // between folders is metadata-only and leaves the object where it was. Using
+  // the current folder here would look for output that isn't there, mark a
+  // perfectly good video as "failed", and never promote the optimised file.
+  const originalKey = storageKey(file);
+  const prefix = storagePrefix(file);
   const fileId = file._id.toString();
 
   const newSize = await promoteTranscodeOutput(
-    `${folderId}/mc_${fileId}_`,
+    prefix ? `${prefix}/mc_${fileId}_` : `mc_${fileId}_`,
     originalKey
   );
 

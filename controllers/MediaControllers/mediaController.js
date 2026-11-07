@@ -1,9 +1,11 @@
 const asyncHandler = require("express-async-handler");
 const {
   uploadFile,
-  deleteFile,
-  deleteFolderFromS3,
-  deleteThumbnailFile,
+  // deleteFile / deleteFolderFromS3 / deleteThumbnailFile all rebuild the S3
+  // key from a folder id, which is wrong for any file that has been moved.
+  // Use deleteKeysFromS3 with a key from utils/mediaStorage instead.
+  deleteKeysFromS3,
+  listKeysUnderPrefix,
   getCloudFrontUrl,
   getPresignedPutUrl,
   headObject,
@@ -21,6 +23,11 @@ const {
   sendUploadError,
 } = require("./progressController");
 const { hasRole } = require("../../middlewares/authMiddleware");
+const {
+  storageKey,
+  storagePrefix,
+  thumbnailStorageKey,
+} = require("../../utils/mediaStorage");
 
 const { v4: uuidv4 } = require("uuid");
 const MediaFiles = require("../../models/MediaManagerModels/mediaFileModel");
@@ -146,10 +153,99 @@ const deleteMediaFolder = asyncHandler(async (req, res, next) => {
     return res.status(403).json({ message: "Access denied" });
   }
 
+  // Work out exactly which objects to delete BEFORE removing anything: the
+  // model's pre-remove hook cascades the DB records away.
+  //
+  // This must not delete the prefix wholesale. A file move is metadata-only, so
+  // a folder's prefix can still hold the bytes of files that were moved OUT of
+  // it and are now listed in another trainer's drive. Prefix-deleting here is
+  // what silently destroys those videos and breaks the exercises pointing at
+  // them — the records survive, so the files still look present in the UI.
+  const folderIds = await collectFolderSubtree(folder._id);
+
+  const doomedFiles = await MediaFiles.find({ folderId: { $in: folderIds } });
+  const keysToDelete = new Set();
+  for (const f of doomedFiles) {
+    keysToDelete.add(storageKey(f));
+    const thumbKey = thumbnailStorageKey(
+      f,
+      ThumbnailService.getThumbnailFilename(f.filename)
+    );
+    if (thumbKey) keysToDelete.add(thumbKey);
+  }
+
+  // Anything else physically under these prefixes is either a file that moved
+  // out (must survive) or genuine litter such as abandoned transcode output
+  // (safe to remove). Ask the database which it is.
+  try {
+    const prefixKeys = [];
+    for (const id of folderIds) {
+      prefixKeys.push(...(await listKeysUnderPrefix(id.toString())));
+    }
+
+    const candidates = prefixKeys.filter((k) => !keysToDelete.has(k));
+    if (candidates.length) {
+      const candidateUrls = candidates.map((k) => getCloudFrontUrl(k));
+      const referencing = await MediaFiles.find({
+        $or: [
+          { s3Key: { $in: candidates } },
+          { filelink: { $in: candidateUrls } },
+          { thumbnailUrl: { $in: candidateUrls } },
+        ],
+      });
+
+      const stillReferenced = new Set();
+      for (const f of referencing) {
+        stillReferenced.add(storageKey(f));
+        const thumbKey = thumbnailStorageKey(
+          f,
+          ThumbnailService.getThumbnailFilename(f.filename)
+        );
+        if (thumbKey) stillReferenced.add(thumbKey);
+      }
+
+      for (const key of candidates) {
+        if (!stillReferenced.has(key)) keysToDelete.add(key);
+      }
+    }
+  } catch (listError) {
+    // If the sweep cannot run, fall back to deleting only the keys we know
+    // belong to this folder's own records. Leaving litter behind is far better
+    // than deleting someone else's video.
+    console.error("Error listing folder objects for cleanup:", listError);
+  }
+
   await folder.remove();
-  await deleteFolderFromS3(req.params.id);
+
+  try {
+    await deleteKeysFromS3([...keysToDelete]);
+  } catch (s3Error) {
+    console.error("Error deleting folder objects from S3:", s3Error);
+  }
+
   res.status(200).json({ message: "Folder and associated media deleted" });
 });
+
+/**
+ * Every folder id in the subtree rooted at `rootId`, including the root.
+ */
+async function collectFolderSubtree(rootId) {
+  const ids = [rootId];
+  let frontier = [rootId];
+
+  // Depth is capped at 3 levels by the schema, but loop generically in case
+  // that changes.
+  while (frontier.length) {
+    const children = await MediaFolder.find({
+      parentId: { $in: frontier },
+    }).select("_id");
+    if (!children.length) break;
+    frontier = children.map((c) => c._id);
+    ids.push(...frontier);
+  }
+
+  return ids;
+}
 
 // @desc    Update media folder
 // @route   PUT /api/media/folder/:id
@@ -464,6 +560,7 @@ const uploadMediaFile = asyncHandler(async (req, res, next) => {
     filename: finalFile.filename,
     originalName: file.originalname,
     filelink: cloudFrontUrl, // Use CloudFront URL instead of S3 URL
+    s3Key: `${folderId}/${finalFile.filename}`,
     mediaType: folder.mediaType,
     size: finalFile.size,
     thumbnailUrl: thumbnailUrl,
@@ -754,6 +851,7 @@ const uploadMediaFileWithProgress = asyncHandler(async (req, res, next) => {
       filename: finalFile.filename,
       originalName: file.originalname,
       filelink: cloudFrontUrl, // Use CloudFront URL instead of S3 URL
+      s3Key: `${folderId}/${finalFile.filename}`,
       mediaType: folder.mediaType,
       size: finalFile.size,
       thumbnailUrl: thumbnailUrl,
@@ -863,21 +961,27 @@ const deleteMediaFile = asyncHandler(async (req, res, next) => {
     return res.status(403).json({ message: "Access denied" });
   }
 
-  // Delete the main file from S3
-  await deleteFile(folderId, file.filename);
+  // Delete the main file from S3.
+  // The key comes from the file's own storage location, NOT from `folderId`:
+  // a moved file still lives under the folder it was uploaded to, so rebuilding
+  // the key from the current folder would delete nothing and orphan the object.
+  const keysToDelete = [storageKey(file)];
 
   // Delete thumbnail if it exists
   if (file.thumbnailUrl && file.mediaType === "video") {
-    try {
-      const thumbnailFilename = ThumbnailService.getThumbnailFilename(
-        file.filename
-      );
-      await deleteThumbnailFile(folderId, thumbnailFilename);
-      console.log("Thumbnail deleted successfully");
-    } catch (thumbnailError) {
-      console.error("Error deleting thumbnail:", thumbnailError);
-      // Continue with file deletion even if thumbnail deletion fails
-    }
+    const thumbKey = thumbnailStorageKey(
+      file,
+      ThumbnailService.getThumbnailFilename(file.filename)
+    );
+    if (thumbKey) keysToDelete.push(thumbKey);
+  }
+
+  try {
+    await deleteKeysFromS3(keysToDelete);
+  } catch (s3Error) {
+    console.error("Error deleting media objects from S3:", s3Error);
+    // Continue with DB deletion so the record does not linger for a file the
+    // user has asked to remove.
   }
 
   await file.remove();
@@ -967,9 +1071,25 @@ const moveMediaFile = asyncHandler(async (req, res, next) => {
     });
   }
 
-  // Update the file's folder
+  // Update the file's folder.
+  //
+  // This is deliberately metadata-only: the S3 object is NOT relocated, so
+  // `filelink` (and therefore every exercise, workout or challenge that stored
+  // that URL) keeps resolving. `s3Key` is pinned here for any legacy record
+  // that predates the field, so the real location survives explicitly rather
+  // than only being recoverable by parsing the link.
+  if (!file.s3Key) file.s3Key = storageKey(file);
+
   file.folderId = newFolderId;
   file.mediaType = destinationFolder.mediaType; // Update media type to match folder
+
+  // Hand ownership to the destination folder's owner. Without this the file
+  // stays owned by whoever uploaded it, so the destination trainer cannot find
+  // it in their own search ("my files" filters on `user`) and is refused when
+  // they try to rename or delete it — the file sits in their drive but is not
+  // theirs.
+  file.user = destinationFolder.user;
+
   await file.save();
 
   res.status(200).json({
@@ -1559,6 +1679,7 @@ const confirmUpload = asyncHandler(async (req, res) => {
     filename,
     originalName,
     filelink: cloudFrontUrl,
+    s3Key,
     mediaType: folder.mediaType,
     size: fileSize,
     thumbnailUrl: null,
@@ -1679,8 +1800,10 @@ const retryOptimization = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: "Only failed files can be retried" });
   }
 
-  const folderId = mediaFile.folderId.toString();
-  const s3Key = `${folderId}/${mediaFile.filename}`;
+  // Use the file's real storage location, and the prefix it actually sits
+  // under, so retrying works for files that have been moved between folders.
+  const s3Key = storageKey(mediaFile);
+  const folderId = storagePrefix(mediaFile);
 
   // Infer image mimetype from filename extension for the picture path
   const ext = (mediaFile.filename.split(".").pop() || "").toLowerCase();

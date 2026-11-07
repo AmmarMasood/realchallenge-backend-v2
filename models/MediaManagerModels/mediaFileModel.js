@@ -23,6 +23,15 @@ const mediaFileSchema = mongoose.Schema({
     type: String,
     required: true,
   },
+  // Immutable location of the bytes in S3. Set once at upload time and never
+  // rewritten — in particular a folder move does NOT change it, because the
+  // object is not relocated and `filelink` must keep resolving. Legacy records
+  // created before this field exists fall back to parsing `filelink`; see
+  // utils/mediaStorage.js. Never rebuild this from `folderId`.
+  s3Key: {
+    type: String,
+    required: false,
+  },
   mediaType: {
     type: String,
     enum: ["video", "audio", "picture", "document", "other"],

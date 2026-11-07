@@ -179,7 +179,67 @@ async function deleteFile(folderId, fileName) {
   return true;
 }
 
-// Delete folder function remains the same
+/**
+ * Delete an explicit list of S3 keys (chunked to the 1000-key API limit) and
+ * invalidate them in CloudFront.
+ *
+ * Prefer this over `deleteFolderFromS3` whenever the caller knows which objects
+ * it owns: a folder prefix can still hold the bytes of files that were MOVED
+ * out of that folder (a move is metadata-only), so deleting by prefix destroys
+ * media that is still referenced elsewhere.
+ */
+async function deleteKeysFromS3(keys) {
+  const unique = [...new Set((keys || []).filter(Boolean))];
+  if (!unique.length) return 0;
+
+  for (let i = 0; i < unique.length; i += 1000) {
+    const chunk = unique.slice(i, i + 1000);
+    await s3
+      .deleteObjects({
+        Bucket: bucketName,
+        Delete: { Objects: chunk.map((Key) => ({ Key })) },
+      })
+      .promise();
+  }
+
+  if (cloudFrontDistributionId) {
+    // CloudFront caps an invalidation batch at 3000 paths; stay well under.
+    for (let i = 0; i < unique.length; i += 1000) {
+      await invalidateCloudFrontCache(unique.slice(i, i + 1000));
+    }
+  }
+
+  return unique.length;
+}
+
+/**
+ * List every key under a prefix. Used so a folder delete can work out which
+ * objects are genuinely orphaned rather than blind-deleting the prefix.
+ */
+async function listKeysUnderPrefix(folderPrefix) {
+  const keys = [];
+  let continuationToken;
+
+  do {
+    const page = await s3
+      .listObjectsV2({
+        Bucket: bucketName,
+        Prefix: folderPrefix + "/",
+        ContinuationToken: continuationToken,
+      })
+      .promise();
+
+    (page.Contents || []).forEach(({ Key }) => keys.push(Key));
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : null;
+  } while (continuationToken);
+
+  return keys;
+}
+
+// DANGEROUS: deletes an entire prefix, including the bytes of any file that was
+// moved out of this folder (moves are metadata-only, so the object stays put).
+// Kept only for callers that have already excluded still-referenced keys.
+// New code should use `deleteKeysFromS3`.
 async function deleteFolderFromS3(folderPrefix) {
   const listedObjects = await s3
     .listObjectsV2({
@@ -242,6 +302,8 @@ function headObject(s3Key) {
 module.exports = {
   deleteFolderFromS3,
   deleteFile,
+  deleteKeysFromS3,
+  listKeysUnderPrefix,
   deleteThumbnailFile,
   uploadFile,
   getCloudFrontUrl,
